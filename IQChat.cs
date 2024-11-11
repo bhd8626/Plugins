@@ -1,3187 +1,122 @@
-using UnityEngine;
-using Object = System.Object;
-using System.Collections.Generic;
-using Oxide.Core;
-using Pool = Facepunch.Pool;
-using CompanionServer;
-using System.Text.RegularExpressions;
 using System;
-using Oxide.Core.Plugins;
-using System.Text;
-using Oxide.Core.Libraries;
-using Oxide.Core.Libraries.Covalence;
-using ConVar;
-using System.IO;
-using Newtonsoft.Json.Linq;
-using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
+using System.Text;
+using CompanionServer;
+using ConVar;
 using Facepunch;
 using Newtonsoft.Json;
-using UnityEngine.Networking;
+using Newtonsoft.Json.Linq;
+using Oxide.Core;
+using Oxide.Core.Libraries;
+using Oxide.Core.Plugins;
 using Oxide.Game.Rust.Cui;
+using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("IQChat", "Mercury", "2.65.46")]
-    [Description("The most pleasant chat for your server from the IQ system")]
+    [Info("IQChat", "Mercury", "0.3.9")]
+    [Description("Самый приятный чат для вашего сервера из ветки IQ")]
     class IQChat : RustPlugin
     {
-        [ChatCommand("adminalert")]
-        private void AdminAlertChatCommand(BasePlayer Sender, String cmd, String[] args)
-        {
-            if (!permission.UserHasPermission(Sender.UserIDString, PermissionAlert)) return;
-            Alert(Sender, args, true);
-        }
-        void OnPlayerCommand(BasePlayer player, string command, string[] args)
-        {
-            DiscordLoggCommand(player, command, args);
-        }
-        
-        
-        [ConsoleCommand("alert")]
-        private void AlertConsoleCommand(ConsoleSystem.Arg args)
-        {
-            BasePlayer Sender = args.Player();
-            if (Sender != null)
-                if (!permission.UserHasPermission(Sender.UserIDString, PermissionAlert)) return;
-
-            Alert(Sender, args.Args, false);
-        }
-
-        void IQRankSetRank(BasePlayer.EncryptedValue<UInt64> userID, string RankKey) => IQRankSetRank(userID.Get(), RankKey);
-        private void DrawUI_IQChat_OpenDropList(BasePlayer player, TakeElementUser ElementType, Int32 Page = 0)
-        {
-            String Interface = InterfaceBuilder.GetInterface("UI_Chat_OpenDropList");
-            if (Interface == null) return;
-
-            if (!LocalBase.ContainsKey(player)) return;
-
-            String Title = String.Empty;
-            String Description = String.Empty;
-            List<Configuration.ControllerParameters.AdvancedFuncion> InfoUI = new List<Configuration.ControllerParameters.AdvancedFuncion>();
-
-            switch (ElementType)
-            {
-                case TakeElementUser.MultiPrefix:
-                case TakeElementUser.Prefix:
-                    {
-                        InfoUI = LocalBase[player].ElementsPrefix;
-                        Title = GetLang("IQCHAT_CONTEXT_SLIDER_PREFIX_TITLE", player.UserIDString);
-                        Description = GetLang("IQCHAT_CONTEXT_DESCRIPTION_PREFIX", player.UserIDString);
-                        break;
-                    }
-                case TakeElementUser.Nick:
-                    {
-                        InfoUI = LocalBase[player].ElementsNick;
-                        Title = GetLang("IQCHAT_CONTEXT_SLIDER_NICK_COLOR_TITLE", player.UserIDString);
-                        Description = GetLang("IQCHAT_CONTEXT_DESCRIPTION_NICK", player.UserIDString);
-                        break;
-                    }
-                case TakeElementUser.Chat:
-                    {
-                        InfoUI = LocalBase[player].ElementsChat;
-                        Title = GetLang("IQCHAT_CONTEXT_SLIDER_MESSAGE_COLOR_TITLE", player.UserIDString);
-                        Description = GetLang("IQCHAT_CONTEXT_DESCRIPTION_CHAT", player.UserIDString);
-                        break;
-                    }
-                case TakeElementUser.Rank:
-                    {
-                        InfoUI = LocalBase[player].ElementsRanks;
-                        Title = GetLang("IQCHAT_CONTEXT_SLIDER_IQRANK_TITLE", player.UserIDString);
-                        Description = GetLang("IQCHAT_CONTEXT_DESCRIPTION_RANK", player.UserIDString);
-                        break;
-                    }
-                default:
-                    break;
-            }
-
-            //  if (InfoUI == null || InfoUI.Count == 0) return;
-
-            Interface = Interface.Replace("%TITLE%", Title);
-            Interface = Interface.Replace("%DESCRIPTION%", Description);
-
-            String CommandRight = InfoUI.Skip(9 * (Page + 1)).Count() > 0 ? $"newui.cmd droplist.controller page.controller {ElementType} + {Page}" : String.Empty;
-            String CommandLeft = Page != 0 ? $"newui.cmd droplist.controller page.controller {ElementType} - {Page}" : String.Empty;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            Interface = Interface.Replace("%NEXT_BTN%", CommandRight);
-            Interface = Interface.Replace("%BACK_BTN%", CommandLeft);
-
-            Interface = Interface.Replace("%COLOR_RIGHT%", String.IsNullOrWhiteSpace(CommandRight) ? "1 1 1 0.1" : "1 1 1 1");
-            Interface = Interface.Replace("%COLOR_LEFT%", String.IsNullOrWhiteSpace(CommandLeft) ? "1 1 1 0.1" : "1 1 1 1");
-
-            CuiHelper.DestroyUi(player, "OpenDropList");
-            CuiHelper.AddUi(player, Interface);
-
-            Int32 Count = 0;
-            Int32 X = 0, Y = 0;
-            foreach (Configuration.ControllerParameters.AdvancedFuncion Info in InfoUI.Skip(9 * Page).Take(9))
-            {
-                DrawUI_IQChat_OpenDropListArgument(player, ElementType, Info, X, Y, Count);
-
-                if (ElementType == TakeElementUser.MultiPrefix && UserInformation[player.userID].Info.PrefixList.Contains(Info.Argument))
-                    DrawUI_IQChat_OpenDropListArgument(player, Count);
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                Count++;
-                X++;
-                if (X == 3)
-                {
-                    X = 0;
-                    Y++;
-                }
-            }
-        }
-        private void OnServerInitialized()
-        {
-            _ = this;
-            
-            if(IQFakeActive && config.ReferenceSetting.IQFakeActiveSettings.UseIQFakeActive)
-                if (IQFakeActive.Version < new Oxide.Core.VersionNumber(2, 0, 0))
-                {
-                    PrintWarning(LanguageEn
-                        ? "You have an outdated version of the IQFakeActive plugin, the plugin cannot access the API, update the IQIQFakeActiveChat plugin to version 2.0.0 or higher"
-                        : "У вас устаревшая версия плагина IQFakeActive, плагин не может получить доступ к API, обновите плагин IQFakeActive до версии 2.0.0 или выше");
-                    NextTick(() => { Interface.Oxide.UnloadPlugin(Name); });
-                    return;
-                }
-
-            timer.Once(3f, () => 
-            {
-                if (!TranslationAPI && config.ReferenceSetting.translationApiSettings.useTranslationApi)
-                {
-                    PrintWarning(LanguageEn
-                        ? "You have TranslationAPI support enabled, but the plugin is not installed. Download and install the plugin - https://umod.org/plugins/translation-api"
-                        : "У вас включена поддержка TranslationAPI, но не установлен плагин. Скачайте и установите плагин - https://umod.org/plugins/translation-api");
-                    NextTick(() => { Interface.Oxide.UnloadPlugin(Name); });
-                    return;
-                }
-            });
-
-            _imageUI = new ImageUI();
-            _imageUI.DownloadImage();
-
-            MigrateDataToNoob();
-
-            foreach (BasePlayer player in BasePlayer.activePlayerList)
-                UserConnecteionData(player);
-
-            RegisteredPermissions();
-            BroadcastAuto();
-
-            CheckValidateUsers();
-
-            if (!config.ControllerMessages.Formatting.ControllerNickname.UseNickController)
-                Unsubscribe("OnUserConnected");
-
-        }
-        String API_GET_DEFAULT_MESSAGE_COLOR() => config.ControllerConnect.SetupDefaults.MessageDefault;
-        private String GetClanTag(UInt64 playerID)
-        {
-            if (!Clans) return String.Empty;
-            if (!config.ReferenceSetting.ClansSettings.UseClanTag) return String.Empty;
-            String ClanTag = (String)Clans?.CallHook("GetClanOf", playerID);
-            if(String.IsNullOrWhiteSpace(ClanTag)) return String.Empty;
-            String tagClan = GetLang("CLANS_SYNTAX_PREFIX", playerID.ToString(), ClanTag);
-            
-            Object resultColorMessage = IsGradientColorValue(config.ReferenceSetting.ClansSettings.colorTag);
-            if (resultColorMessage is List<String> gradientColors)
-                tagClan = ApplyGradientToText(tagClan, gradientColors);
-            else tagClan = $"<color={config.ReferenceSetting.ClansSettings.colorTag}>{tagClan}</color>";
-
-            return tagClan;
-        }
-		   		 		  						  	   		  		 			  		  		  			 		   			
-        String API_GET_PREFIX(BasePlayer.EncryptedValue<UInt64> ID) => API_GET_PREFIX(ID.Get());
-        
-        [ChatCommand("unmutevoice")]
-        void UnMuteVoiceCustomChat(BasePlayer Moderator, string cmd, string[] arg)
-        {
-            if (!permission.UserHasPermission(Moderator.UserIDString, PermissionMute)) return;
-            if (arg == null || arg.Length != 1 || arg.Length > 1)
-            {
-                ReplySystem(Moderator, LanguageEn ? "Invalid syntax, please use : unmutevoice Steam64ID" : "Неверный синтаксис,используйте : unmutevoice Steam64ID");
-                return;
-            }
-            string NameOrID = arg[0];
-            
-            if (IsFakeUser(NameOrID))
-            {
-                List<FakePlayer> playerList = GetCombinedPlayerList();
-                if (playerList != null)
-                {
-                    FakePlayer fakeUser = playerList.FirstOrDefault(x => x.userId.Equals(NameOrID) || x.displayName.ToLower().Contains(NameOrID.ToLower()));
-                    if (fakeUser != null)
-                        UnmutePlayer(null, MuteType.Chat, Moderator, false, true, fakeUser.userId);
-                }
-                return;
-            }
-            
-            BasePlayer target = GetPlayerNickOrID(NameOrID);
-            if (target == null)
-            {
-                UInt64 Steam64ID = 0;
-                if (UInt64.TryParse(NameOrID, out Steam64ID))
-                {
-                    if (UserInformation.ContainsKey(Steam64ID))
-                    {
-                        User Info = UserInformation[Steam64ID];
-                        if (Info == null) return;
-                        if (!Info.MuteInfo.IsMute(MuteType.Voice))
-                        {
-                            ReplySystem(Moderator, LanguageEn ? "The player does not have a chat lock" : "У игрока нет блокировки чата");
-                            return;
-                        }
-                        
-                        if (!Moderator.IsAdmin && Moderator.userID == Steam64ID)
-                        {
-                            ReplySystem(Moderator, GetLang("FUNC_MESSAGE_UNMUTE_YOURSELF", Moderator.UserIDString));
-                            return;
-                        }
-
-                        Info.MuteInfo.UnMute(MuteType.Voice);
-                        ReplySystem(Moderator, LanguageEn ? "You have unblocked the offline chat to the player" : "Вы разблокировали чат offline игроку");
-                        return;
-                    }
-                    else
-                    {
-                        ReplySystem(Moderator, LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                        return;
-                    }
-                }
-                else
-                {
-                    ReplySystem(Moderator, LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                    return;
-                }
-            }
-            UnmutePlayer(target, MuteType.Voice, Moderator, false, true);
-        }
-        private void DrawUI_IQChat_Slider_Update_Argument(BasePlayer player, TakeElementUser ElementType)
-        {
-            String Interface = InterfaceBuilder.GetInterface("UI_Chat_Slider_Update_Argument");
-            User Info = UserInformation[player.userID];
-            if (Info == null || Interface == null) return;
-
-            String Argument = String.Empty;
-            String Name = String.Empty;
-            String Parent = String.Empty;
-            
-            switch (ElementType)
-            {
-                case TakeElementUser.Prefix:
-                    Argument = Info.Info.Prefix;
-                    Parent = "SLIDER_PREFIX";
-                    Name = "ARGUMENT_PREFIX";
-                    break;
-                case TakeElementUser.Nick:
-
-                    String DisplayName = player.displayName;
-                    String ColorNickPlayer = Info.Info.ColorNick;
-                    Object resultColorNick = IsGradientColorValue(ColorNickPlayer);
-                    if (resultColorNick is List<String> gradientColors)
-                        DisplayName = ApplyGradientToText(DisplayName, gradientColors);
-                    else DisplayName = $"<color={ColorNickPlayer}>{DisplayName}</color>";
-                    
-                    Argument = DisplayName;
-                    Parent = "SLIDER_NICK_COLOR";
-                    Name = "ARGUMENT_NICK_COLOR";
-                    break;
-                case TakeElementUser.Chat:
-                    String ChatMessage = GetLang("IQCHAT_CONTEXT_NICK_DISPLAY_MESSAGE", player.UserIDString);
-                    String ColorChat = Info.Info.ColorMessage;
-                    Object resultColorChat = IsGradientColorValue(ColorChat);
-                    if (resultColorChat is List<String> gradientChatColors)
-                        ChatMessage = ApplyGradientToText(ChatMessage, gradientChatColors);
-                    else ChatMessage = $"<color={ColorChat}>{ChatMessage}</color>";
-                    
-                    Argument = ChatMessage;
-                    Parent = "SLIDER_MESSAGE_COLOR";
-                    Name = "ARGUMENT_MESSAGE_COLOR";
-                    break;
-                case TakeElementUser.Rank:
-                    Argument = IQRankGetNameRankKey(Info.Info.Rank) ?? GetLang("IQCHAT_CONTEXT_SLIDER_IQRANK_TITLE_NULLER", player.UserIDString);
-                    Parent = "SLIDER_IQRANK";
-                    Name = "ARGUMENT_RANK";
-                    break;
-                default:
-                    break;
-            }
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            String Pattern = @"</?size.*?>";
-            String ArgumentRegex = Regex.IsMatch(Argument, Pattern) ? Regex.Replace(Argument, Pattern, "") : Argument;
-            Interface = Interface.Replace("%ARGUMENT%", ArgumentRegex);
-            Interface = Interface.Replace("%PARENT%", Parent);
-            Interface = Interface.Replace("%NAME%", Name);
-
-            CuiHelper.DestroyUi(player, Name);
-            CuiHelper.AddUi(player, Interface);
-
-        }
-        private Dictionary<String, TranslationState> saveTranslate = new();
-
-        protected override void LoadConfig()
-        {
-            base.LoadConfig();
-            try
-            {
-                config = Config.ReadObject<Configuration>();
-                if (config == null) LoadDefaultConfig();
-
-                if (config.OtherSetting.renameSteamApiKey == null)
-                    config.OtherSetting.renameSteamApiKey = "";
-                
-                if (config.ControllerMessages.Formatting.BadWords == null ||
-                    config.ControllerMessages.Formatting.BadWords.Count == 0)
-                {
-                    config.ControllerMessages.Formatting.BadWords = LanguageEn
-                        ? new Dictionary<String, Boolean>()
-                            { ["fucking"] = false, ["sucking"] = false, ["fuckyou"] = false, ["fuck"] = true }
-                        : new Dictionary<String, Boolean>()
-                            { ["бля"] = false, ["сука"] = false, ["говно"] = false, ["нахуй"] = true };
-                }
-
-                if (config.ControllerMessages.Formatting.ControllerNickname.BadNicks == null ||
-                    config.ControllerMessages.Formatting.ControllerNickname.BadNicks.Count == 0)
-                {
-                    config.ControllerMessages.Formatting.ControllerNickname.BadNicks = LanguageEn
-                        ? new Dictionary<String, Boolean>()
-                            { ["Admin"] = true, ["Owner"] = true, ["Moderator"] = true, ["Helper"] = true }
-                        : new Dictionary<String, Boolean>()
-                            { ["Админ"] = true, ["Модератор"] = true, ["Модер"] = true, ["Хелпер"] = true };
-                }
-
-                if (config.ReferenceSetting.playerRanksSettings.colorTag == null)
-                    config.ReferenceSetting.playerRanksSettings.colorTag =
-                        "#FF0000, #FF3300, #FF6600, #FF9900, #FFCC00, #FFFF00, #CCFF00, #99FF00, #66FF00, #33FF00";
-                
-                if (config.ReferenceSetting.ClansSettings.colorTag == null)
-                    config.ReferenceSetting.ClansSettings.colorTag =
-                        "#FF0000, #FF3300, #FF6600, #FF9900, #FFCC00, #FFFF00, #CCFF00, #99FF00, #66FF00, #33FF00";
-                
-                if (config.ReferenceSetting.XLevelsSettings.colorTag == null)
-                    config.ReferenceSetting.XLevelsSettings.colorTag =
-                        "#FF0000, #FF3300, #FF6600, #FF9900, #FFCC00, #FFFF00, #CCFF00, #99FF00, #66FF00, #33FF00";
-                
-                if (config.ReferenceSetting.skillTreeSettings.colorTag == null)
-                    config.ReferenceSetting.skillTreeSettings.colorTag =
-                        "#FF0000, #FF3300, #FF6600, #FF9900, #FFCC00, #FFFF00, #CCFF00, #99FF00, #66FF00, #33FF00";
-
-                if (config.ReferenceSetting.xPrisonSettings == null)
-                {
-                    config.ReferenceSetting.xPrisonSettings = new Configuration.ReferenceSettings.XPrison()
-                    {
-                        UseXPrison = false,
-                        colorTag = "#FF0000, #FF3300, #FF6600, #FF9900, #FFCC00, #FFFF00, #CCFF00, #99FF00, #66FF00, #33FF00",
-                    };
-                }
-                
-                if (config.ReferenceSetting.xPrisonSettings.colorTag == null)
-                    config.ReferenceSetting.xPrisonSettings.colorTag =
-                        "#FF0000, #FF3300, #FF6600, #FF9900, #FFCC00, #FFFF00, #CCFF00, #99FF00, #66FF00, #33FF00";
-            }
-            catch
-            {
-                PrintWarning(LanguageEn
-                    ? $"Error #132 read configuration 'oxide/config/{Name}', create a new configuration!!"
-                    : $"Ошибка #132 чтения конфигурации 'oxide/config/{Name}', создаём новую конфигурацию!!");
-
-                LoadDefaultConfig();
-            }
-
-            NextTick(SaveConfig);
-        }
-        
-                private void DrawUI_IQChat_Context(BasePlayer player)
-        {
-            String Interface = InterfaceBuilder.GetInterface("UI_Chat_Context");
-            User Info = UserInformation[player.userID];
-            Configuration.ControllerParameters ControllerParameter = config.ControllerParameter;
-            if (Info == null || ControllerParameter == null || Interface == null) return;
-
-            String BackgroundStatic = IQRankSystem && config.ReferenceSetting.IQRankSystems.UseRankSystem ? "UI_IQCHAT_CONTEXT_RANK" : "UI_IQCHAT_CONTEXT_NO_RANK";
-            
-            Interface = Interface.Replace("%IMG_BACKGROUND%", _imageUI.GetImage(BackgroundStatic));
-            Interface = Interface.Replace("%TITLE%", GetLang("IQCHAT_CONTEXT_TITLE", player.UserIDString));
-            Interface = Interface.Replace("%SETTING_ELEMENT%", GetLang("IQCHAT_CONTEXT_SETTING_ELEMENT_TITLE", player.UserIDString));
-            Interface = Interface.Replace("%INFORMATION%", GetLang("IQCHAT_CONTEXT_INFORMATION_TITLE", player.UserIDString));
-            Interface = Interface.Replace("%SETTINGS%", GetLang("IQCHAT_CONTEXT_SETTINGS_TITLE", player.UserIDString));
-            Interface = Interface.Replace("%SETTINGS_PM%", GetLang("IQCHAT_CONTEXT_SETTINGS_PM_TITLE", player.UserIDString));
-            Interface = Interface.Replace("%SETTINGS_ALERT%", GetLang("IQCHAT_CONTEXT_SETTINGS_ALERT_TITLE", player.UserIDString));
-            Interface = Interface.Replace("%SETTINGS_ALERT_PM%", GetLang("IQCHAT_CONTEXT_SETTINGS_ALERT_PM_TITLE", player.UserIDString));
-            Interface = Interface.Replace("%SETTINGS_SOUNDS%", GetLang("IQCHAT_CONTEXT_SETTINGS_SOUNDS_TITLE", player.UserIDString));
-            Interface = Interface.Replace("%MUTE_STATUS_TITLE%", GetLang("IQCHAT_CONTEXT_MUTE_STATUS_TITLE", player.UserIDString));
-            Interface = Interface.Replace("%IGNORED_STATUS_COUNT%", GetLang("IQCHAT_CONTEXT_IGNORED_STATUS_COUNT", player.UserIDString, Info.Settings.IgnoreUsers.Count));
-            Interface = Interface.Replace("%IGNORED_STATUS_TITLE%", GetLang("IQCHAT_CONTEXT_IGNORED_STATUS_TITLE", player.UserIDString));
-            Interface = Interface.Replace("%NICK_DISPLAY_TITLE%", GetLang("IQCHAT_CONTEXT_NICK_DISPLAY_TITLE", player.UserIDString));
-            Interface = Interface.Replace("%MUTE_STATUS_PLAYER%", Info.MuteInfo.IsMute(MuteType.Chat) ? FormatTime(Info.MuteInfo.GetTime(MuteType.Chat), player.UserIDString) : GetLang("IQCHAT_CONTEXT_MUTE_STATUS_NOT", player.UserIDString));
-            Interface = Interface.Replace("%SLIDER_PREFIX_TITLE%", GetLang("IQCHAT_CONTEXT_SLIDER_PREFIX_TITLE", player.UserIDString));
-            Interface = Interface.Replace("%SLIDER_NICK_COLOR_TITLE%", GetLang("IQCHAT_CONTEXT_SLIDER_NICK_COLOR_TITLE", player.UserIDString));
-
-            Interface = Interface.Replace("%SLIDER_MESSAGE_COLOR_TITLE%",GetLang("IQCHAT_CONTEXT_SLIDER_MESSAGE_COLOR_TITLE", player.UserIDString));
-            
-            Interface = Interface.Replace("%SLIDER_IQRANK_TITLE%", IQRankSystem && config.ReferenceSetting.IQRankSystems.UseRankSystem ? GetLang("IQCHAT_CONTEXT_SLIDER_IQRANK_TITLE", player.UserIDString) : String.Empty);
-
-            CuiHelper.DestroyUi(player, InterfaceBuilder.UI_Chat_Context);
-            CuiHelper.AddUi(player, Interface);
-
-            DrawUI_IQChat_Update_DisplayName(player);
-
-            if (ControllerParameter.VisualParametres.PrefixType == SelectedParametres.DropList || ControllerParameter.Prefixes.TurnMultiPrefixes)
-                DrawUI_IQChat_DropList(player, "-46.788 67.4", "-14.788 91.4", GetLang("IQCHAT_CONTEXT_SLIDER_PREFIX_TITLE_DESCRIPTION", player.UserIDString), ControllerParameter.Prefixes.TurnMultiPrefixes ? TakeElementUser.MultiPrefix : TakeElementUser.Prefix);
-            else DrawUI_IQChat_Sliders(player, "SLIDER_PREFIX", "-140 54", "-16 78", TakeElementUser.Prefix);
-
-            if (ControllerParameter.VisualParametres.NickColorType == SelectedParametres.DropList)
-                DrawUI_IQChat_DropList(player, "112.34 67.4", "144.34 91.4", GetLang("IQCHAT_CONTEXT_SLIDER_CHAT_NICK_TITLE_DESCRIPTION", player.UserIDString), TakeElementUser.Nick);
-            else DrawUI_IQChat_Sliders(player, "SLIDER_NICK_COLOR", "20 54", "144 78", TakeElementUser.Nick);
-            
-            if (ControllerParameter.VisualParametres.ChatColorType == SelectedParametres.DropList)
-                DrawUI_IQChat_DropList(player, "-46.787 -0.591", "-14.787 23.409",GetLang("IQCHAT_CONTEXT_SLIDER_CHAT_MESSAGE_TITLE_DESCRIPTION", player.UserIDString),TakeElementUser.Chat);
-            else DrawUI_IQChat_Sliders(player, "SLIDER_MESSAGE_COLOR", "-140 -12", "-16 12", TakeElementUser.Chat);
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            if (IQRankSystem && config.ReferenceSetting.IQRankSystems.UseRankSystem)
-            {
-                if (ControllerParameter.VisualParametres.IQRankSystemType == SelectedParametres.DropList)
-                    DrawUI_IQChat_DropList(player, "112.34 -0.591", "144.34 23.409", GetLang("IQCHAT_CONTEXT_SLIDER_IQRANK_TITLE_DESCRIPTION", player.UserIDString), TakeElementUser.Rank);
-                else DrawUI_IQChat_Sliders(player, "SLIDER_IQRANK", "20 -12", "144 12", TakeElementUser.Rank);
-            }
-
-            DrawUI_IQChat_Update_Check_Box(player, ElementsSettingsType.PM, "143.38 -67.9", "151.38 -59.9", Info.Settings.TurnPM);
-            DrawUI_IQChat_Update_Check_Box(player, ElementsSettingsType.Broadcast, "143.38 -79.6", "151.38 -71.6", Info.Settings.TurnBroadcast);
-            DrawUI_IQChat_Update_Check_Box(player, ElementsSettingsType.Alert, "143.38 -91.6", "151.38 -83.6", Info.Settings.TurnAlert);
-            DrawUI_IQChat_Update_Check_Box(player, ElementsSettingsType.Sound, "143.38 -103.6", "151.38 -95.6", Info.Settings.TurnSound);
-            DrawUI_IQChat_Context_AdminAndModeration(player);
-        }
-        public class TranslationState
-        {
-            public Boolean IsProcessed { get; set; }
-            public String Translation { get; set; }
-            public String DoTranslation { get; set; }
-        }
-
-        [ConsoleCommand("hunmute")]
-        void HideUnMuteConsole(ConsoleSystem.Arg arg)
-        {
-            if (arg.Player() != null)
-                if (!permission.UserHasPermission(arg.Player().UserIDString, PermissionMute)) return;
-            if (arg == null || arg.Args == null || arg.Args.Length != 1 || arg.Args.Length > 1)
-            {
-                PrintWarning(LanguageEn ? "Invalid syntax, please use : hunmute Steam64ID" : "Неверный синтаксис,используйте : hunmute Steam64ID");
-                return;
-            }
-            string NameOrID = arg.Args[0];
-            BasePlayer target = GetPlayerNickOrID(NameOrID);
-            if (target == null)
-            {
-                UInt64 Steam64ID = 0;
-                if (UInt64.TryParse(NameOrID, out Steam64ID))
-                {
-                    if (UserInformation.ContainsKey(Steam64ID))
-                    {
-                        User Info = UserInformation[Steam64ID];
-                        if (Info == null) return;
-                        if (!Info.MuteInfo.IsMute(MuteType.Chat))
-                        {
-                            ConsoleOrPrintMessage(arg.Player(),
-                                LanguageEn ? "The player does not have a chat lock" : "У игрока нет блокировки чата");
-                            return;
-                        }
-                        
-                        if (arg.Player()!= null)
-                        {
-                            if (!arg.Player().IsAdmin && arg.Player().userID == Steam64ID)
-                            {
-                                ConsoleOrPrintMessage(arg.Player(),
-                                    LanguageEn
-                                        ? "You can't unlock the chat by yourself"
-                                        : "Вы не можете снять блокировку чата сами с себя");
-
-                                return;
-                            }
-                        }
-                    
-                        Info.MuteInfo.UnMute(MuteType.Chat);
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                        ConsoleOrPrintMessage(arg.Player(),
-                            LanguageEn ? "You have unblocked the offline chat to the player" : "Вы разблокировали чат offline игроку");
-                        return;
-                    }
-                    else
-                    {
-                        ConsoleOrPrintMessage(arg.Player(),
-                            LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                        return;
-                    }
-                }
-                else
-                {
-                    ConsoleOrPrintMessage(arg.Player(),
-                        LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                    return;
-                }
-            }
-
-            UnmutePlayer(target, MuteType.Chat, arg.Player(), true, true);
-        }
-
-        
-        
-        
-        private const Boolean LanguageEn = false;
-        //TODO: https://docs.rustapp.io/ru/dev/custom-alerts.html (добавить поддержку)
-        //TODO: Добавить перевод префиксов
         /// <summary>
-        /// Обновление 2.///
-        /// - Добавлена возможность блокировать личный чат (pm, r) - если у игрока заблокирован чат, включается отдельно в конфигурации
-        /// - Добавлен новый пункт в конфигурацию с возможностью отключить дополнительное логирование сообщений в RCON
-        /// - Добавлена поддержка AutoEmoje by YaMang -w-
-        /// - Добавлен новый хук : Object OnMessageIQChat(String message) - вызывается каждую отправку сообщения, позволяет получить и редактировать отправленное сообщение (нужно вернуть новый String)
-        /// - Добавлен новый хук : void OnPlayerUnMuted(BasePlayer target, BasePlayer moderator) - вызывается после разблокировки чата игрока
-        /// </summary>
+        /// Обновление 0.3.6
+        /// - Изменил настройки пользователя по умолчанию включенными
+        /// - Корректировка UI в дроп листе
+        /// - Поправил исчезновение стрелочек в сладйерах при растягивании экрана 
+        /// - Добавил возможность выбора тип UI для каждого элемента , слайдер или дроп.лист
+        /// - Добавил страницы в дроп.листы 
+        /// - Добавил возможность настраиввать расположение UI через конфиг (для опытных пользователей)
+        /// - Добавлены комнды на ручную блокировку чата (консольная и чат) : (/)mute Steam64ID Причина Время(секунды)
+        /// - Добавлены комнды на ручную разблолкирку чата (консольная и чат) : (/)unmute Steam64ID
+        /// - Добавлены команды на скрытую блокировку чата, уведомления о блокировке будет видеть только игрок и модератор (консольная и чат) : (/)hmute Steam64ID Причина Время(секунды)
+        /// - Добавлены команды на скрытую разблолкирку чата, уведомления о разблокировке будет видеть только игрок и модератор (консольная и чат) : (/)hunmute Steam64ID
+        /// - Добавлена консольная команда migrate , которая переведет настройки ВСЕХ игроков в состояние ВКЛЮЧЕНО
+        /// - Поправки в совместной работе в IQModalMenu (вскоре выйдет)
+        /// - Добавлена проерка на префиксы, теперь если вы удалили префикс, у игрока он так-же удалится
+        /// Обновление 0.3.7
+        /// - Поправлены страницы в дроп.листе для IQModalMenu
+        /// - Поправлена встраиваемая панель с чатом в IQModalMenu
+        /// - Вернул чатовую команду /mute (Случайно была задета и удалена)
+        /// - Корректировки API : API_SEND_PLAYER - добавлен вывод форматированного сообщения в консоль
+        /// Обновление 0.3.8
+        /// - Исправлен чат после обновления
+        /// - Добавлены команды для чата и консоли :
+        /// - (/)adminalert Сообщение - высылает всем оповещение игнорируя то, что у игрока выключен показ оповещений
+        /// - Исправлено отображение аватарки пользователя, если выключен вход с информацией о стране
+        /// - Добавлена возможность скрыть оповоещение о входе администратора
+        /// - Добавлена возможность скрыть оповоещение о выходе администратора
+        /// - Поправил синтаксис команде saybro , теперь можно использовать ник и Steam64ID 
+        /// - Поправил синтаксис команде alertuip , теперь можно использовать ник и Steam64ID 
+        /// /// </summary>
 
-                [PluginReference] Plugin ImageLibrary, IQFakeActive, IQRankSystem, XLevels, Clans, XPrison, TranslationAPI, RustApp, SkillTree, PlayerRanks;
+        #region Reference
+        [PluginReference] Plugin IQPersonal, IQFakeActive, XDNotifications, IQRankSystem, IQModalMenu;
+
+        #region IQModalMenu
+        bool IQModalMenuConnected() => (bool)IQModalMenu.Call("API_Connected_Plugin", this, config.ReferenceSetting.IQModalMenuSettings.Avatar, config.ReferenceSetting.IQModalMenuSettings.Sprite, "iq.chat.modal");
+        bool IQModalMenuDisconnected() => (bool)IQModalMenu.Call("API_Disconnected_Plugin", this);
+        void IQModalSend(BasePlayer player) => IQModalMenu.Call("API_Send_Menu", player, this);
+        #endregion
+
+        #region IQPersonal
+        public void SetMute(BasePlayer player) => IQPersonal?.CallHook("API_SET_MUTE", player.userID);
+        public void BadWords(BasePlayer player) => IQPersonal?.CallHook("API_DETECTED_BAD_WORDS", player.userID);
+        #endregion
+
+        #region XDNotifications
+        private void AddNotify(BasePlayer player, string title, string description, string command = "", string cmdyes = "", string cmdno = "")
+        {
+            if (!XDNotifications) return;
+            var Setting = config.ReferenceSetting.XDNotificationsSettings;
+            Interface.Oxide.CallHook("AddNotify", player, title, description, Setting.Color, Setting.AlertDelete, Setting.SoundEffect, command, cmdyes, cmdno);
+        }
+        #endregion
+
+        #region IQFakeActive
+        public bool IsFake(string DisplayName) => (bool)IQFakeActive?.Call("IsFake", DisplayName);
+        void SyncReservedFinish()
+        {
+            if (!config.ReferenceSetting.IQFakeActiveSettings.UseIQFakeActive) return;
+            PrintWarning("IQChat - успешно синхронизирована с IQFakeActive");
+            PrintWarning("=============SYNC==================");
+        }
+        #endregion
+
+        #region IQRankSystem
+        string IQRankGetRank(ulong userID) => (string)(IQRankSystem?.Call("API_GET_RANK_NAME", userID));
+        string IQRankGetTimeGame(ulong userID) => (string)(IQRankSystem?.Call("API_GET_TIME_GAME", userID));
+        List<string> IQRankListKey(ulong userID) => (List<string>)(IQRankSystem?.Call("API_RANK_USER_KEYS", userID));
+        string IQRankGetNameRankKey(string Key) => (string)(IQRankSystem?.Call("API_GET_RANK_NAME", Key));
         void IQRankSetRank(ulong userID, string RankKey) => IQRankSystem?.Call("API_SET_ACTIVE_RANK", userID, RankKey);
-        String API_GET_PREFIX(UInt64 ID)
+
+        #endregion
+
+        #endregion
+
+        #region Vars
+        private enum MuteType
         {
-            if (!UserInformation.ContainsKey(ID)) return String.Empty;
-            Configuration.ControllerParameters ControllerParameter = config.ControllerParameter;
-
-            User Info = UserInformation[ID];
-            String Prefixes = String.Empty;
-
-            if (ControllerParameter.Prefixes.TurnMultiPrefixes)
-                Prefixes = String.Join("", Info.Info.PrefixList.Take(ControllerParameter.Prefixes.MaximumMultiPrefixCount));
-            else Prefixes = Info.Info.Prefix;
-
-            return Prefixes;
+            Chat,
+            Voice
         }
-        
-        
-        [ConsoleCommand("set")]
-        private void CommandSet(ConsoleSystem.Arg args)
+        private enum TakeElemntUser
         {
-            BasePlayer Sender = args.Player();
-
-            if (Sender != null)
-                if (!Sender.IsAdmin)
-                    return;
-
-            if (args == null || args.Args == null || args.Args.Length != 3)
-            {
-                if (Sender != null)
-                    ReplySystem(Sender, LanguageEn ? "Use syntax correctly : set [Steam64ID] [prefix/chat/nick/custom] [Argument]" : "Используйте правильно ситаксис : set [Steam64ID] [prefix/chat/nick/custom] [Argument]");
-                else PrintWarning(LanguageEn ? "Use syntax correctly : set [Steam64ID] [prefix/chat/nick/custom] [Argument]" : "Используйте правильно ситаксис : set [Steam64ID] [prefix/chat/nick/custom] [Argument]");
-                return;
-            }
-
-            UInt64 Steam64ID = 0;
-            BasePlayer player = null;
-
-            if (UInt64.TryParse(args.Args[0], out Steam64ID))
-                player = BasePlayer.FindByID(Steam64ID);
-
-            if (player == null)
-            {
-                if (Sender != null)
-                    ReplySystem(Sender, LanguageEn ? "Incorrect player Steam ID or syntax error\nUse syntax correctly : set [Steam64ID] [prefix/chat/nick/custom] [Argument]" : "Неверно указан SteamID игрока или ошибка в синтаксисе\nИспользуйте правильно ситаксис : set [Steam64ID] [prefix/chat/nick/custom] [Argument]");
-                else PrintWarning(LanguageEn ? "Incorrect player Steam ID or syntax error\nUse syntax correctly : set [Steam64ID] [prefix/chat/nick/custom] [Argument]" : "Неверно указан SteamID игрока или ошибка в синтаксисе\nИспользуйте правильно ситаксис : set [Steam64ID] [prefix/chat/nick/custom] [Argument]");
-                return;
-            }
-            if (!UserInformation.ContainsKey(player.userID))
-            {
-                if (Sender != null)
-                    ReplySystem(Sender, LanguageEn ? $"Player not found!" : $"Игрок не найден!");
-                else PrintWarning(LanguageEn ? $"Player not found!" : $"Игрок не найден!");
-                return;
-            }
-            User Info = UserInformation[player.userID];
-
-            Configuration.ControllerParameters ControllerParameter = config.ControllerParameter;
-
-            switch (args.Args[1])
-            {
-                case "prefix":
-                    {
-                        String KeyPrefix = args.Args[2];
-                        if (ControllerParameter.Prefixes.Prefixes.Count(prefix => prefix.Argument.Contains(KeyPrefix)) == 0)
-                        {
-                            if (Sender != null)
-                                ReplySystem(Sender, LanguageEn ? "Argument not found in your configuration" : $"Аргумент не найден в вашей конфигурации!");
-                            else PrintWarning(LanguageEn ? $"Argument not found in your configuration" : $"Аргумент не найден в вашей конфигурации");
-                            return;
-                        }
-
-                        foreach (Configuration.ControllerParameters.AdvancedFuncion Prefix in ControllerParameter.Prefixes.Prefixes.Where(prefix => prefix.Argument.Contains(KeyPrefix)).Take(1))
-                        {
-                            if (ControllerParameter.Prefixes.TurnMultiPrefixes)
-                                Info.Info.PrefixList.Add(Prefix.Argument);
-                            else Info.Info.Prefix = Prefix.Argument;
-
-                            if (Sender != null)
-                                ReplySystem(Sender, LanguageEn ? $"Prefix successfully set to - {Prefix.Argument}" : $"Префикс успешно установлен на - {Prefix.Argument}");
-                            else Puts(LanguageEn ? $"Prefix successfully set to - {Prefix.Argument}" : $"Префикс успешно установлен на - {Prefix.Argument}");
-                        }
-                        break;
-                    }
-                case "chat":
-                    {
-                        String KeyChatColor = args.Args[2];
-                        if (ControllerParameter.MessageColorList.Count(color => color.Argument.Contains(KeyChatColor)) == 0)
-                        {
-                            if (Sender != null)
-                                ReplySystem(Sender, LanguageEn ? $"Argument not found in your configuration!" : $"Аргумент не найден в вашей конфигурации!");
-                            else PrintWarning(LanguageEn ? $"Argument not found in your configuration" : $"Аргумент не найден в вашей конфигурации");
-                            return;
-                        }
-
-                        foreach (Configuration.ControllerParameters.AdvancedFuncion ChatColor in ControllerParameter.MessageColorList.Where(color => color.Argument.Contains(KeyChatColor)).Take(1))
-                        {
-                            Info.Info.ColorMessage = ChatColor.Argument;
-                            if (Sender != null)
-                                ReplySystem(Sender, LanguageEn ? $"Message color successfully set to - {ChatColor.Argument}" : $"Цвет сообщения успешно установлен на - {ChatColor.Argument}");
-                            else Puts(LanguageEn ? $"Message color successfully set to - {ChatColor.Argument}" : $"Цвет сообщения успешно установлен на - {ChatColor.Argument}");
-                        }
-                        break;
-                    }
-                case "nick":
-                    {
-                        String KeyNickColor = args.Args[2];
-                        if (ControllerParameter.NickColorList.Count(color => color.Argument.Contains(KeyNickColor)) == 0)
-                        {
-                            if (Sender != null)
-                                ReplySystem(Sender, LanguageEn ? $"Argument not found in your configuration!" : $"Аргумент не найден в вашей конфигурации!");
-                            else PrintWarning(LanguageEn ? "Argument not found in your configuration" : $"Аргумент не найден в вашей конфигурации");
-                            return;
-                        }
-
-                        foreach (Configuration.ControllerParameters.AdvancedFuncion NickColor in ControllerParameter.NickColorList.Where(color => color.Argument.Contains(KeyNickColor)).Take(1))
-                        {
-                            Info.Info.ColorNick = NickColor.Argument;
-                            if (Sender != null)
-                                ReplySystem(Sender, LanguageEn ? $"Message color successfully set to - {NickColor.Argument}" : $"Цвет сообщения успешно установлен на - {NickColor.Argument}");
-                            else Puts(LanguageEn ? $"Message color successfully set to - {NickColor.Argument}" : $"Цвет сообщения успешно установлен на - {NickColor.Argument}");
-                        }
-                        break;
-                    }
-                case "custom":
-                    {
-                        String CustomPrefix = args.Args[2];
-                        if (ControllerParameter.Prefixes.TurnMultiPrefixes)
-                            Info.Info.PrefixList.Add(CustomPrefix);
-                        else Info.Info.Prefix = CustomPrefix;
-                        if (Sender != null)
-                            ReplySystem(Sender, LanguageEn ? $"Custom prefix successfully set to - {CustomPrefix}" : $"Кастомный префикс успешно установлен на - {CustomPrefix}");
-                        else Puts(LanguageEn ? $"Custom prefix successfully set to - {CustomPrefix}" : $"Кастомный префикс успешно установлен на - {CustomPrefix}");
-
-                        break;
-                    }
-                default:
-                    {
-                        if (Sender != null)
-                            ReplySystem(Sender, LanguageEn ? "Use syntax correctly : set [Steam64ID] [prefix/chat/nick/custom] [Argument]" : "Используйте правильно ситаксис : set [Steam64ID] [prefix/chat/nick/custom] [Argument]");
-                        break;
-                    }
-            }
-
-        }
-
-        
-        
-                private new void LoadDefaultMessages()
-        {
-            PrintWarning(LanguageEn ? "Language file is loading..." : "Языковой файл загружается...");
-            lang.RegisterMessages(new Dictionary<string, string>
-            {
-                ["FUNC_MESSAGE_MUTE_CHAT"] = "{0} muted {1}\nDuration : {2}\nReason : {3}",
-                ["FUNC_MESSAGE_UNMUTE_CHAT"] = "{0} unmuted {1}",
-                ["FUNC_MESSAGE_MUTE_VOICE"] = "{0} muted voice to {1}\nDuration : {2}\nReason : {3}",
-                ["FUNC_MESSAGE_UNMUTE_VOICE"] = "{0} unmuted voice to {1}",
-                ["FUNC_MESSAGE_UNMUTE_YOURSELF"] = "You can't unlock the chat by yourself",
-                ["FUNC_MESSAGE_MUTE_ALL_CHAT"] = "Chat disabled",
-                ["FUNC_MESSAGE_UNMUTE_ALL_CHAT"] = "Chat enabled",
-                ["FUNC_MESSAGE_MUTE_ALL_VOICE"] = "Voice chat disabled",
-                ["FUNC_MESSAGE_UNMUTE_ALL_VOICE"] = "Voice chat enabled",
-                ["FUNC_MESSAGE_MUTE_ALL_ALERT"] = "Blocking by Administrator",
-                ["FUNC_MESSAGE_PM_TURN_FALSE"] = "The player has forbidden to send himself private messages",
-                ["FUNC_MESSAGE_ALERT_TURN_FALSE"] = "The player has not been allowed to notify himself",
-
-                ["FUNC_MESSAGE_NO_ARG_BROADCAST"] = "You can not send an empty broadcast message!",
-
-                ["UI_ALERT_TITLE"] = "<size=14><b>Notification</b></size>",
-
-                ["COMMAND_NOT_PERMISSION"] = "You dont have permissions to use this command",
-                ["COMMAND_RENAME_NOTARG"] = "For rename use : /rename [NewNickname] [NewID (Optional)]",
-                ["COMMAND_RENAME_NOT_ID"] = "Incorrect ID for renaming! Use Steam64ID or leave blank",
-                ["COMMAND_RENAME_SUCCES"] = "You have successfully changed your nickname!\nyour nickname : {0}\nYour ID : {1}",
-                ["COMMAND_RENAME_RESET_SUCCES"] = "You have successfully reset your nickname changes, all data is reset to zero",
-                ["COMMAND_RENAME_PROCESS_STEAM"] = "Requesting data from Steam, it may take some time",
-                ["COMMAND_RENAME_NOTHING"] = "Your nickname has not changed",
-
-                ["COMMAND_PM_NOTARG"] = "To send pm use : /pm Nickname Message",
-                ["COMMAND_PM_NOT_NULL_MSG"] = "Message is empty!",
-                ["COMMAND_PM_NOT_USER"] = "User not found or offline",
-                ["COMMAND_PM_SUCCESS"] = "Your private message sent successful\n\nMessage : {0}\n\nDelivered : {1}",
-                ["COMMAND_PM_SEND_MSG"] = "Message from {0}\n\n{1}",
-                
-                ["COMMAND_COLOR_CUSTOM_MAX_ARGUMENTS"] = "You specified more than 10 colors for setting the color, the first 10 colors were taken",
-                ["COMMAND_COLOR_CUSTOM_NOT_ARG"] = "You need to specify colors in HEX format",
-                ["COMMAND_COLOR_CUSTOM_NOT_HEX"] = "You incorrectly specified this color: {0}",
-                ["COMMAND_COLOR_CUSTOM_ACCESS"] = "You have successfully set the color",
-
-                ["COMMAND_R_NOTARG"] = "For reply use : /r Message",
-                ["COMMAND_R_NOTMSG"] = "You dont have any private conversations yet!",
-
-                ["FLOODERS_MESSAGE"] = "You're typing too fast! Please Wait {0} seconds",
-
-                ["PREFIX_SETUP"] = "You have successfully removed the prefix {0}, it is already activated and installed",
-                ["COLOR_CHAT_SETUP"] = "You have successfully picked up the {0}, it is already activated and installed",
-                ["COLOR_CHAT_SETUP_TITLE"] = "chat color",
-                ["COLOR_NICK_SETUP"] = "You have successfully taken the {0}, it is already activated and installed",
-                ["COLOR_NICK_SETUP_TITLE"] = "nickname color",
-
-                ["PREFIX_RETURNRED"] = "Your prefix {0} expired, it was reset automatically",
-                ["COLOR_CHAT_RETURNRED"] = "Action of your {0} over, it is reset automatically",
-                ["COLOR_NICK_RETURNRED"] = "Action of your {0} over, it is reset automatically",
-                ["COLOR_NICK_RETURNRED_TITLE"] = "color nick",
-                ["COLOR_CHAT_RETURNRED_TITLE"] = "color chat",
-                ["WELCOME_PLAYER"] = "{0} came online",
-                ["LEAVE_PLAYER"] = "{0} left",
-                ["WELCOME_PLAYER_WORLD"] = "{0} came online. Country: {1}",
-                ["LEAVE_PLAYER_REASON"] = "{0} left. Reason: {1}",
-
-                ["IGNORE_ON_PLAYER"] = "You added {0} in black list",
-                ["IGNORE_OFF_PLAYER"] = "You removed {0} from black list",
-                ["IGNORE_NO_PM"] = "This player added you in black list. Your message has not been delivered.",
-                ["IGNORE_NO_PM_ME"] = "You added this player in black list. Your message has not been delivered.",
-                ["INGORE_NOTARG"] = "To ignore a player use : /ignore nickname",
-
-                ["DISCORD_SEND_LOG_CHAT"] = "Player : {0}({1})\nFiltred message : {2}\nMessage : {3}",
-                ["DISCORD_SEND_LOG_MUTE"] = "{0}({1}) give mute chat\nSuspect : {2}({3})\nReason : {4}",
-
-                ["TITLE_FORMAT_DAYS"] = "D",
-                ["TITLE_FORMAT_HOURSE"] = "H",
-                ["TITLE_FORMAT_MINUTES"] = "M",
-                ["TITLE_FORMAT_SECONDS"] = "S",
-
-                ["IQCHAT_CONTEXT_TITLE"] = "SETTING UP A CHAT", ///"%TITLE%"
-                ["IQCHAT_CONTEXT_SETTING_ELEMENT_TITLE"] = "CUSTOM SETTING", ///"%SETTING_ELEMENT%"
-                ["IQCHAT_CONTEXT_INFORMATION_TITLE"] = "INFORMATION", ///"%INFORMATION%"
-                ["IQCHAT_CONTEXT_SETTINGS_TITLE"] = "SETTINGS", ///"%SETTINGS%"
-                ["IQCHAT_CONTEXT_SETTINGS_PM_TITLE"] = "Private messages", ///"%SETTINGS_PM%"
-                ["IQCHAT_CONTEXT_SETTINGS_ALERT_TITLE"] = "Notification in the chat", ///"%SETTINGS_ALERT%"
-                ["IQCHAT_CONTEXT_SETTINGS_ALERT_PM_TITLE"] = "Mention in the chat", ///"%SETTINGS_ALERT_PM%"
-                ["IQCHAT_CONTEXT_SETTINGS_SOUNDS_TITLE"] = "Sound notification", ///"%SETTINGS_SOUNDS%"
-                ["IQCHAT_CONTEXT_MUTE_STATUS_NOT"] = "NO", ///"%MUTE_STATUS_PLAYER%"
-                ["IQCHAT_CONTEXT_MUTE_STATUS_TITLE"] = "Blocking the chat", ///"%MUTE_STATUS_TITLE%"
-                ["IQCHAT_CONTEXT_IGNORED_STATUS_COUNT"] = "<size=11>{0}</size> human (а)", ///"%IGNORED_STATUS_COUNT%"
-                ["IQCHAT_CONTEXT_IGNORED_STATUS_TITLE"] = "Ignoring", ///"%IGNORED_STATUS_TITLE%"
-                ["IQCHAT_CONTEXT_NICK_DISPLAY_TITLE"] = "Your nickname", ///"%NICK_DISPLAY_TITLE%"
-                ["IQCHAT_CONTEXT_NICK_DISPLAY_MESSAGE"] = "i love iqchat",
-                ["IQCHAT_CONTEXT_SLIDER_PREFIX_TITLE"] = "Prefix", /// %SLIDER_PREFIX_TITLE%
-                ["IQCHAT_CONTEXT_SLIDER_NICK_COLOR_TITLE"] = "Nick", /// %SLIDER_NICK_COLOR_TITLE%
-                ["IQCHAT_CONTEXT_SLIDER_MESSAGE_COLOR_TITLE"] = "Message", /// %SLIDER_MESSAGE_COLOR_TITLE%
-                ["IQCHAT_CONTEXT_SLIDER_IQRANK_TITLE"] = "Rank",
-                ["IQCHAT_CONTEXT_SLIDER_IQRANK_TITLE_NULLER"] = "Absent",
-                ["IQCHAT_CONTEXT_SLIDER_PREFIX_TITLE_DESCRIPTION"] = "Choosing a prefix", /// 
-                ["IQCHAT_CONTEXT_SLIDER_CHAT_NICK_TITLE_DESCRIPTION"] = "Choosing a nickname color", /// 
-                ["IQCHAT_CONTEXT_SLIDER_CHAT_MESSAGE_TITLE_DESCRIPTION"] = "Chat Color Selection", /// 
-                ["IQCHAT_CONTEXT_SLIDER_IQRANK_TITLE_DESCRIPTION"] = "Rank Selection", /// 
-                ["IQCHAT_CONTEXT_DESCRIPTION_PREFIX"] = "Prefix Setting",
-                ["IQCHAT_CONTEXT_DESCRIPTION_NICK"] = "Setting up a nickname",
-                ["IQCHAT_CONTEXT_DESCRIPTION_CHAT"] = "Setting up a message",
-                ["IQCHAT_CONTEXT_DESCRIPTION_RANK"] = "Setting up the rank",
-
-                ["IQCHAT_ALERT_TITLE"] = "ALERT", /// %TITLE_ALERT%
-
-                ["IQCHAT_TITLE_IGNORE_AND_MUTE_MUTED"] = "LOCK MANAGEMENT",
-                ["IQCHAT_TITLE_IGNORE_AND_MUTE_IGNORED"] = "IGNORING MANAGEMENT",
-                ["IQCHAT_TITLE_IGNORE_TITLES"] = "<b>DO YOU REALLY WANT TO IGNORE\n{0}?</b>",
-                ["IQCHAT_TITLE_IGNORE_TITLES_UNLOCK"] = "<b>DO YOU WANT TO REMOVE THE IGNORING FROM THE PLAYER\n{0}?</b>",
-                ["IQCHAT_TITLE_IGNORE_BUTTON_YES"] = "<b>YES, I WANT TO</b>",
-                ["IQCHAT_TITLE_IGNORE_BUTTON_NO"] = "<b>NO, I CHANGED MY MIND</b>",
-                ["IQCHAT_TITLE_MODERATION_PANEL"] = "MODERATOR PANEL",
-
-                ["IQCHAT_BUTTON_MODERATION_MUTE_MENU"] = "Lock Management",
-                ["IQCHAT_BUTTON_MODERATION_MUTE_MENU_TITLE_ALERT"] = "SELECT AN ACTION",
-                ["IQCHAT_BUTTON_MODERATION_MUTE_MENU_TITLE_ALERT_REASON"] = "SELECT THE REASON FOR BLOCKING",
-                ["IQCHAT_BUTTON_MODERATION_MUTE_MENU_TITLE_ALERT_CHAT"] = "Block chat",
-                ["IQCHAT_BUTTON_MODERATION_MUTE_MENU_TITLE_ALERT_VOICE"] = "Block voice",
-                ["IQCHAT_BUTTON_MODERATION_UNMUTE_MENU_TITLE_ALERT_CHAT"] = "Unblock chat",
-                ["IQCHAT_BUTTON_MODERATION_UNMUTE_MENU_TITLE_ALERT_VOICE"] = "Unlock voice",
-                ["IQCHAT_BUTTON_MODERATION_MUTE_ALL_CHAT"] = "Block all chat",
-                ["IQCHAT_BUTTON_MODERATION_UNMUTE_ALL_CHAT"] = "Unblock all chat",
-                ["IQCHAT_BUTTON_MODERATION_MUTE_ALL_VOICE"] = "Block everyone's voice",
-                ["IQCHAT_BUTTON_MODERATION_UNMUTE_ALL_VOICE"] = "Unlock everyone's voice",
-
-                ["IQCHAT_FUNCED_NO_SEND_CHAT_MUTED"] = "You have an active chat lock : {0}",
-                ["IQCHAT_FUNCED_NO_SEND_CHAT_MUTED_ALL_CHAT"] = "The administrator blocked everyone's chat. Expect full unblocking",
-                ["IQCHAT_FUNCED_NO_SEND_CHAT_MUTED_ALL_VOICE"] = "The administrator blocked everyone's voice chat. Expect full unblocking",
-                ["IQCHAT_FUNCED_NO_SEND_CHAT_UMMUTED_ALL_VOICE"] = "The administrator has unblocked the voice chat for everyone",
-                ["IQCHAT_FUNCED_NO_SEND_CHAT_UNMUTED_ALL_CHAT"] = "The administrator has unblocked the chat for everyone",
-
-                ["IQCHAT_FUNCED_ALERT_TITLE"] = "<color=#a7f64f><b>[MENTION FROM {0}]</b></color>",
-                ["IQCHAT_FUNCED_ALERT_TITLE_ISMUTED"] = "The player has already been muted!",
-                ["IQCHAT_FUNCED_ALERT_TITLE_SERVER"] = "Administrator",
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                ["IQCHAT_INFO_ONLINE"] = "Now on the server :\n{0}",
-
-                ["IQCHAT_INFO_ANTI_NOOB"] = "You first connected to the server!\nPlay some more {0}\nTo get access to send messages to the global and team chat!",
-                ["IQCHAT_INFO_ANTI_NOOB_PM"] = "You first connected to the server!\nPlay some more {0}\nTo access sending messages to private messages!",
-
-                ["SKILLTREE_SYNTAX_PRESTIGE_LEVEL"] = "[{0} prestige]",
-                ["SKILLTREE_SYNTAX_LEVEL"] = "[{0} Level]",
-                ["SKILLTREE_SYNTAX_XP"] = "[{0} XP]",
-                ["XLEVELS_SYNTAX_PREFIX"] = "[{0} Level]",
-                ["CLANS_SYNTAX_PREFIX"] = "[{0}]",
-                ["XPRISON_SYNTAX_PREFIX"] = "<color=orange>[{0}]</color>",
-
-            }, this);
-
-            lang.RegisterMessages(new Dictionary<string, string>
-            {
-                ["FUNC_MESSAGE_MUTE_CHAT"] = "{0} заблокировал чат игроку {1}\nДлительность : {2}\nПричина : {3}",
-                ["FUNC_MESSAGE_UNMUTE_CHAT"] = "{0} разблокировал чат игроку {1}",
-                ["FUNC_MESSAGE_MUTE_VOICE"] = "{0} заблокировал голос игроку {1}\nДлительность : {2}\nПричина : {3}",
-                ["FUNC_MESSAGE_UNMUTE_VOICE"] = "{0} разблокировал голос игроку {1}",
-                ["FUNC_MESSAGE_UNMUTE_YOURSELF"] = "Вы не можете снять блокировку чата сами с себя",
-                ["FUNC_MESSAGE_MUTE_ALL_CHAT"] = "Всем игрокам был заблокирован чат",
-                ["FUNC_MESSAGE_UNMUTE_ALL_CHAT"] = "Всем игрокам был разблокирован чат",
-                ["FUNC_MESSAGE_MUTE_ALL_VOICE"] = "Всем игрокам был заблокирован голос",
-                ["FUNC_MESSAGE_MUTE_ALL_ALERT"] = "Блокировка Администратором",
-                ["FUNC_MESSAGE_UNMUTE_ALL_VOICE"] = "Всем игрокам был разблокирован голос",
-
-                ["FUNC_MESSAGE_PM_TURN_FALSE"] = "Игрок запретил присылать себе личные сообщения",
-                ["FUNC_MESSAGE_ALERT_TURN_FALSE"] = "Игрок запретил уведомлять себя",
-
-                ["FUNC_MESSAGE_NO_ARG_BROADCAST"] = "Вы не можете отправлять пустое сообщение в оповещение!",
-
-                ["UI_ALERT_TITLE"] = "<size=14><b>Уведомление</b></size>",
-
-                ["COMMAND_NOT_PERMISSION"] = "У вас недостаточно прав для данной команды",
-                ["COMMAND_RENAME_NOTARG"] = "Используйте команду так : /rename [НовыйНик] [НовыйID (По желанию)]",
-                ["COMMAND_RENAME_NOT_ID"] = "Неверно указан ID для переименования! Используйте Steam64ID, либо оставьте поле пустым",
-                ["COMMAND_RENAME_SUCCES"] = "Вы успешно изменили ник!\nВаш ник : {0}\nВаш ID : {1}",
-                ["COMMAND_RENAME_RESET_SUCCES"] = "Вы успешно сбросили изменения ника, все данные обнулены",
-                ["COMMAND_RENAME_PROCESS_STEAM"] = "Запрашиваем данные у Steam, это может занять некоторое время",
-                ["COMMAND_RENAME_NOTHING"] = "Ваш ник не изменялся",
-
-                ["COMMAND_PM_NOTARG"] = "Используйте команду так : /pm Ник Игрока Сообщение",
-                ["COMMAND_PM_NOT_NULL_MSG"] = "Вы не можете отправлять пустое сообщение",
-                ["COMMAND_PM_NOT_USER"] = "Игрок не найден или не в сети",
-                ["COMMAND_PM_SUCCESS"] = "Ваше сообщение успешно доставлено\n\nСообщение : {0}\n\nДоставлено : {1}",
-                ["COMMAND_PM_SEND_MSG"] = "Сообщение от {0}\n\n{1}",
-
-                ["COMMAND_COLOR_CUSTOM_MAX_ARGUMENTS"] = "Вы указали больше 10 цветов для установки цвета, были взяты первые 10 цветов",
-                ["COMMAND_COLOR_CUSTOM_NOT_ARG"] = "Вам нужно указать цвета в формате HEX",
-                ["COMMAND_COLOR_CUSTOM_NOT_HEX"] = "Вы некорректно указали данный цвет : {0}",
-                ["COMMAND_COLOR_CUSTOM_ACCESS"] = "Вы успешно установили цвет",
-                
-                ["COMMAND_R_NOTARG"] = "Используйте команду так : /r Сообщение",
-                ["COMMAND_R_NOTMSG"] = "Вам или вы ещё не писали игроку в личные сообщения!",
-
-                ["FLOODERS_MESSAGE"] = "Вы пишите слишком быстро! Подождите {0} секунд",
-
-                ["PREFIX_SETUP"] = "Вы успешно забрали префикс {0}, он уже активирован и установлен",
-                ["COLOR_CHAT_SETUP"] = "Вы успешно забрали {0}, он уже активирован и установлен",
-                ["COLOR_CHAT_SETUP_TITLE"] = "цвет чата",
-                ["COLOR_NICK_SETUP"] = "Вы успешно забрали {0}, он уже активирован и установлен",
-                ["COLOR_NICK_SETUP_TITLE"] = "цвет ника",
-
-                ["PREFIX_RETURNRED"] = "Действие вашего префикса {0} окончено, он сброшен автоматически",
-                ["COLOR_CHAT_RETURNRED"] = "Действие вашего {0} окончено, он сброшен автоматически",
-                ["COLOR_CHAT_RETURNRED_TITLE"] = "цвета чата",
-                ["COLOR_NICK_RETURNRED"] = "Действие вашего {0} окончено, он сброшен автоматически",
-                ["COLOR_NICK_RETURNRED_TITLE"] = "цвета ника",
-
-                ["WELCOME_PLAYER"] = "{0} зашел на сервер",
-                ["LEAVE_PLAYER"] = "{0} вышел с сервера",
-                ["WELCOME_PLAYER_WORLD"] = "{0} зашел на сервер.Из {1}",
-                ["LEAVE_PLAYER_REASON"] = "{0} вышел с сервера.Причина {1}",
-
-                ["IGNORE_ON_PLAYER"] = "Вы добавили игрока {0} в черный список",
-                ["IGNORE_OFF_PLAYER"] = "Вы убрали игрока {0} из черного списка",
-                ["IGNORE_NO_PM"] = "Данный игрок добавил вас в ЧС,ваше сообщение не будет доставлено",
-                ["IGNORE_NO_PM_ME"] = "Вы добавили данного игрока в ЧС,ваше сообщение не будет доставлено",
-                ["INGORE_NOTARG"] = "Используйте команду так : /ignore Ник Игрока",
-
-                ["DISCORD_SEND_LOG_CHAT"] = "Игрок : {0}({1})\nФильтрованное сообщение : {2}\nИзначальное сообщение : {3}",
-                ["DISCORD_SEND_LOG_MUTE"] = "{0}({1}) выдал блокировку чата\nИгрок : {2}({3})\nПричина : {4}",
-
-                ["TITLE_FORMAT_DAYS"] = "Д",
-                ["TITLE_FORMAT_HOURSE"] = "Ч",
-                ["TITLE_FORMAT_MINUTES"] = "М",
-                ["TITLE_FORMAT_SECONDS"] = "С",
-
-                ["IQCHAT_CONTEXT_TITLE"] = "НАСТРОЙКА ЧАТА", ///"%TITLE%"
-                ["IQCHAT_CONTEXT_SETTING_ELEMENT_TITLE"] = "ПОЛЬЗОВАТЕЛЬСКАЯ НАСТРОЙКА", ///"%SETTING_ELEMENT%"
-                ["IQCHAT_CONTEXT_INFORMATION_TITLE"] = "ИНФОРМАЦИЯ", ///"%INFORMATION%"
-                ["IQCHAT_CONTEXT_SETTINGS_TITLE"] = "НАСТРОЙКИ", ///"%SETTINGS%"
-                ["IQCHAT_CONTEXT_SETTINGS_PM_TITLE"] = "Личные сообщения", ///"%SETTINGS_PM%"
-                ["IQCHAT_CONTEXT_SETTINGS_ALERT_TITLE"] = "Оповещение в чате", ///"%SETTINGS_ALERT%"
-                ["IQCHAT_CONTEXT_SETTINGS_ALERT_PM_TITLE"] = "Упоминание в чате", ///"%SETTINGS_ALERT_PM%"
-                ["IQCHAT_CONTEXT_SETTINGS_SOUNDS_TITLE"] = "Звуковое оповещение", ///"%SETTINGS_SOUNDS%"
-                ["IQCHAT_CONTEXT_MUTE_STATUS_NOT"] = "НЕТ", ///"%MUTE_STATUS_PLAYER%"
-                ["IQCHAT_CONTEXT_MUTE_STATUS_TITLE"] = "Блокировка чата", ///"%MUTE_STATUS_TITLE%"
-                ["IQCHAT_CONTEXT_IGNORED_STATUS_COUNT"] = "<size=11>{0}</size> человек (а)", ///"%IGNORED_STATUS_COUNT%"
-                ["IQCHAT_CONTEXT_IGNORED_STATUS_TITLE"] = "Игнорирование", ///"%IGNORED_STATUS_TITLE%"
-                ["IQCHAT_CONTEXT_NICK_DISPLAY_TITLE"] = "Ваш ник", ///"%NICK_DISPLAY_TITLE%"
-                ["IQCHAT_CONTEXT_NICK_DISPLAY_MESSAGE"] = "люблю iqchat",
-                ["IQCHAT_CONTEXT_SLIDER_PREFIX_TITLE"] = "Префикс", /// %SLIDER_PREFIX_TITLE%
-                ["IQCHAT_CONTEXT_SLIDER_NICK_COLOR_TITLE"] = "Ник", /// %SLIDER_NICK_COLOR_TITLE%
-                ["IQCHAT_CONTEXT_SLIDER_MESSAGE_COLOR_TITLE"] = "Чат", /// %SLIDER_MESSAGE_COLOR_TITLE%
-                ["IQCHAT_CONTEXT_SLIDER_IQRANK_TITLE"] = "Ранг",
-                ["IQCHAT_CONTEXT_SLIDER_IQRANK_TITLE_NULLER"] = "Отсутствует",
-                ["IQCHAT_CONTEXT_SLIDER_PREFIX_TITLE_DESCRIPTION"] = "Выбор префикса", /// 
-                ["IQCHAT_CONTEXT_SLIDER_CHAT_NICK_TITLE_DESCRIPTION"] = "Выбор цвета ника", /// 
-                ["IQCHAT_CONTEXT_SLIDER_CHAT_MESSAGE_TITLE_DESCRIPTION"] = "Выбор цвета чата", /// 
-                ["IQCHAT_CONTEXT_SLIDER_IQRANK_TITLE_DESCRIPTION"] = "Выбор ранга", /// 
-                ["IQCHAT_CONTEXT_DESCRIPTION_PREFIX"] = "Настройка префикса",
-                ["IQCHAT_CONTEXT_DESCRIPTION_NICK"] = "Настройка ника",
-                ["IQCHAT_CONTEXT_DESCRIPTION_CHAT"] = "Настройка сообщения",
-                ["IQCHAT_CONTEXT_DESCRIPTION_RANK"] = "Настройка ранга",
-
-
-                ["IQCHAT_ALERT_TITLE"] = "УВЕДОМЛЕНИЕ", /// %TITLE_ALERT%
-                ["IQCHAT_TITLE_IGNORE_AND_MUTE_MUTED"] = "УПРАВЛЕНИЕ БЛОКИРОВКАМИ",
-                ["IQCHAT_TITLE_IGNORE_AND_MUTE_IGNORED"] = "УПРАВЛЕНИЕ ИГНОРИРОВАНИЕМ",
-                ["IQCHAT_TITLE_IGNORE_TITLES"] = "<b>ВЫ ДЕЙСТВИТЕЛЬНО ХОТИТЕ ИГНОРИРОВАТЬ\n{0}?</b>",
-                ["IQCHAT_TITLE_IGNORE_TITLES_UNLOCK"] = "<b>ВЫ ХОТИТЕ СНЯТЬ ИГНОРИРОВАНИЕ С ИГРОКА\n{0}?</b>",
-                ["IQCHAT_TITLE_IGNORE_BUTTON_YES"] = "<b>ДА, ХОЧУ</b>",
-                ["IQCHAT_TITLE_IGNORE_BUTTON_NO"] = "<b>НЕТ, ПЕРЕДУМАЛ</b>",
-                ["IQCHAT_TITLE_MODERATION_PANEL"] = "ПАНЕЛЬ МОДЕРАТОРА",
-
-                ["IQCHAT_BUTTON_MODERATION_MUTE_MENU"] = "Управление блокировками",
-                ["IQCHAT_BUTTON_MODERATION_MUTE_MENU_TITLE_ALERT"] = "ВЫБЕРИТЕ ДЕЙСТВИЕ",
-                ["IQCHAT_BUTTON_MODERATION_MUTE_MENU_TITLE_ALERT_REASON"] = "ВЫБЕРИТЕ ПРИЧИНУ БЛОКИРОВКИ",
-                ["IQCHAT_BUTTON_MODERATION_MUTE_MENU_TITLE_ALERT_CHAT"] = "Заблокировать чат",
-                ["IQCHAT_BUTTON_MODERATION_MUTE_MENU_TITLE_ALERT_VOICE"] = "Заблокировать голос",
-                ["IQCHAT_BUTTON_MODERATION_UNMUTE_MENU_TITLE_ALERT_CHAT"] = "Разблокировать чат",
-                ["IQCHAT_BUTTON_MODERATION_UNMUTE_MENU_TITLE_ALERT_VOICE"] = "Разблокировать голос",
-                ["IQCHAT_BUTTON_MODERATION_MUTE_ALL_CHAT"] = "Заблокировать всем чат",
-                ["IQCHAT_BUTTON_MODERATION_UNMUTE_ALL_CHAT"] = "Разблокировать всем чат",
-                ["IQCHAT_BUTTON_MODERATION_MUTE_ALL_VOICE"] = "Заблокировать всем голос",
-                ["IQCHAT_BUTTON_MODERATION_UNMUTE_ALL_VOICE"] = "Разблокировать всем голос",
-
-                ["IQCHAT_FUNCED_NO_SEND_CHAT_MUTED"] = "У вас имеется активная блокировка чата : {0}",
-                ["IQCHAT_FUNCED_NO_SEND_CHAT_MUTED_ALL_CHAT"] = "Администратор заблокировал всем чат. Ожидайте полной разблокировки",
-                ["IQCHAT_FUNCED_NO_SEND_CHAT_MUTED_ALL_VOICE"] = "Администратор заблокировал всем голосоввой чат. Ожидайте полной разблокировки",
-                ["IQCHAT_FUNCED_NO_SEND_CHAT_UMMUTED_ALL_VOICE"] = "Администратор разрблокировал всем голосоввой чат",
-                ["IQCHAT_FUNCED_NO_SEND_CHAT_UNMUTED_ALL_CHAT"] = "Администратор разрблокировал всем чат",
-
-                ["IQCHAT_FUNCED_ALERT_TITLE"] = "<color=#a7f64f><b>[УПОМИНАНИЕ ОТ {0}]</b></color>",
-                ["IQCHAT_FUNCED_ALERT_TITLE_ISMUTED"] = "Игрок уже был замучен!",
-                ["IQCHAT_FUNCED_ALERT_TITLE_SERVER"] = "Администратор",
-
-                ["IQCHAT_INFO_ONLINE"] = "Сейчас на сервере :\n{0}",
-
-                ["IQCHAT_INFO_ANTI_NOOB"] = "Вы впервые подключились на сервер!\nОтыграйте еще {0}\nЧтобы получить доступ к отправке сообщений в глобальный и командный чат!",
-                ["IQCHAT_INFO_ANTI_NOOB_PM"] = "Вы впервые подключились на сервер!\nОтыграйте еще {0}\nЧтобы получить доступ к отправке сообщений в личные сообщения!",
-
-                ["SKILLTREE_SYNTAX_LEVEL"] = "[{0} Level]",
-                ["SKILLTREE_SYNTAX_PRESTIGE_LEVEL"] = "[{0} престиж]",
-                ["SKILLTREE_SYNTAX_XP"] = "[{0} XP]",
-                ["XLEVELS_SYNTAX_PREFIX"] = "[{0} Level]",
-                ["CLANS_SYNTAX_PREFIX"] = "[{0}]",
-                ["XPRISON_SYNTAX_PREFIX"] = "<color=orange>[{0}]</color>",
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            }, this, "ru");
-
-            lang.RegisterMessages(new Dictionary<string, string>
-            {
-                ["FUNC_MESSAGE_MUTE_CHAT"] = "{0} silenciado {1}\n Duración: {2}\nRazón: {3}",
-                ["FUNC_MESSAGE_UNMUTE_CHAT"] = "{0} sin silenciar {1}",
-                ["FUNC_MESSAGE_MUTE_VOICE"] = "{0} voz apagada a {1}\n Duracion : {2}\n Razon : {3}",
-                ["FUNC_MESSAGE_UNMUTE_VOICE"] = "{0} voz no silenciada a {1}",
-                ["FUNC_MESSAGE_UNMUTE_YOURSELF"] = "No puedes desbloquear el chat por ti mismo",
-                ["FUNC_MESSAGE_MUTE_ALL_CHAT"] = "Chat desactivado",
-                ["FUNC_MESSAGE_UNMUTE_ALL_CHAT"] = "Chat habilitado",
-                ["FUNC_MESSAGE_MUTE_ALL_VOICE"] = "Chat de voz desactivado",
-                ["FUNC_MESSAGE_UNMUTE_ALL_VOICE"] = "Chat de voz habilitado",
-                ["FUNC_MESSAGE_MUTE_ALL_ALERT"] = "Bloqueo por parte del administrador",
-                ["FUNC_MESSAGE_PM_TURN_FALSE"] = "El jugador tiene prohibido enviarse mensajes privados",
-                ["FUNC_MESSAGE_ALERT_TURN_FALSE"] = "El jugador no ha podido notificarse a sí mismo",
-                ["FUNC_MESSAGE_NO_ARG_BROADCAST"] = "No se puede enviar un mensaje vacío.",
-                ["UI_ALERT_TITLE"] = "<size=14><b>Notificación</b></size>",
-                ["COMMAND_NOT_PERMISSION"] = "No tienes permisos para usar este comando",
-                ["COMMAND_RENAME_NOTARG"] = "Para renombrar utilice : /rename [NewNickname] [NewID (Optional)]",
-                ["COMMAND_RENAME_NOT_ID"] = "¡ID incorrecto para renombrar! Utilice Steam64ID o déjelo en blanco",
-                ["COMMAND_RENAME_SUCCES"] = "Has cambiado con éxito tu nombre de usuario. \n Tu nombre de usuario: {0}. \nTu ID: {1}.",
-                ["COMMAND_RENAME_RESET_SUCCES"] = "Has restablecido con éxito los cambios de Nick, todos los datos están a cero",
-                ["COMMAND_RENAME_PROCESS_STEAM"] = "Solicitamos datos a Steam, esto puede llevar algún tiempo",
-                ["COMMAND_RENAME_NOTHING"] = "Su apodo no ha cambiado",
-                ["COMMAND_PM_NOTARG"] = "Para enviar pm utilice : /pm [Nombre] [Mensaje]",
-                ["COMMAND_PM_NOT_NULL_MSG"] = "¡El mensaje está vacío!",
-                ["COMMAND_PM_NOT_USER"] = "Usuario no encontrado o desconectado",
-                ["COMMAND_PM_SUCCESS"] = "Su mensaje privado enviado con éxito \n Mensage : {0}\n : Entregado{1}",
-                ["COMMAND_PM_SEND_MSG"] = "Mensaje de {0}\n{1}",
-                ["COMMAND_COLOR_CUSTOM_MAX_ARGUMENTS"] = "Has especificado más de 10 colores para configurar el color, se han tomado los primeros 10 colores",
-                ["COMMAND_COLOR_CUSTOM_NOT_ARG"] = "Necesitas especificar colores en formato HEX",
-                ["COMMAND_COLOR_CUSTOM_NOT_HEX"] = "Has especificado incorrectamente este color: {0}",
-                ["COMMAND_COLOR_CUSTOM_ACCESS"] = "Has establecido el color con éxito",
-                ["COMMAND_R_NOTARG"] = "Para responder utilice : /r Mensaje",
-                ["COMMAND_R_NOTMSG"] = "Todavía no tienes ninguna conversación privada.",
-                ["FLOODERS_MESSAGE"] = "¡Estás escribiendo demasiado rápido! Por favor, espere {0} segundos",
-                ["PREFIX_SETUP"] = "Has eliminado con éxito el prefijo {0}.",
-                ["COLOR_CHAT_SETUP"] = "Has obtenido un nuevo color en el chat",
-                ["COLOR_CHAT_SETUP_TITLE"] = "chat color",
-                ["COLOR_NICK_SETUP"] = "Has cambiado tu nick correctamente del chat",
-                ["COLOR_NICK_SETUP_TITLE"] = "nick color",
-                ["PREFIX_RETURNRED"] = "Su prefijo {0} ha caducado, se ha restablecido automáticamente",
-                ["COLOR_CHAT_RETURNRED"] = "Acción de su {0} más, se restablece automáticamente",
-                ["COLOR_NICK_RETURNRED"] = "Acción de su {0} sobre, se restablece automáticamente",
-                ["COLOR_NICK_RETURNRED_TITLE"] = "color nick",
-                ["COLOR_CHAT_RETURNRED_TITLE"] = "color chat",
-                ["WELCOME_PLAYER"] = "{0} Se ha conectado",
-                ["LEAVE_PLAYER"] = "{0} izquierda",
-                ["WELCOME_PLAYER_WORLD"] = "{0} Se ha conectado del Pais: {1}",
-                ["LEAVE_PLAYER_REASON"] = "{0} Se ha desconectado. Razon: {1}",
-                ["IGNORE_ON_PLAYER"] = "Has añadido {0} en la lista negra",
-                ["IGNORE_OFF_PLAYER"] = "Has eliminado el jugador {0} de la lista negra",
-                ["IGNORE_NO_PM"] = "Este jugador te ha añadido a la lista negra. Su mensaje no ha sido entregado.",
-                ["IGNORE_NO_PM_ME"] = "Has añadido a este jugador en la lista negra. Su mensaje no ha sido entregado.",
-                ["INGORE_NOTARG"] = "Para ignorar a un jugador utiliza : /ignore nickname",
-                ["DISCORD_SEND_LOG_CHAT"] = "JUgador : {0}({1})\nMensaje filtrado : {2}\nMensages : {3}",
-                ["DISCORD_SEND_LOG_MUTE"] = "{0}({1}) give mute chat\nSuspect : {2}({3})\nReason : {4}",
-                ["TITLE_FORMAT_DAYS"] = "D",
-                ["TITLE_FORMAT_HOURSE"] = "H",
-                ["TITLE_FORMAT_MINUTES"] = "M",
-                ["TITLE_FORMAT_SECONDS"] = "S",
-                ["IQCHAT_CONTEXT_TITLE"] = "ESTABLECER UN CHAT",
-                ["IQCHAT_CONTEXT_SETTING_ELEMENT_TITLE"] = "AJUSTE PERSONALIZADO",
-                ["IQCHAT_CONTEXT_INFORMATION_TITLE"] = "INFORMACIÓN",
-                ["IQCHAT_CONTEXT_SETTINGS_TITLE"] = "AJUSTES",
-                ["IQCHAT_CONTEXT_SETTINGS_PM_TITLE"] = "Mensajes privados",
-                ["IQCHAT_CONTEXT_SETTINGS_ALERT_TITLE"] = "Notificación en el chat",
-                ["IQCHAT_CONTEXT_SETTINGS_ALERT_PM_TITLE"] = "Mención en el chat",
-                ["IQCHAT_CONTEXT_SETTINGS_SOUNDS_TITLE"] = "Notificación sonora",
-                ["IQCHAT_CONTEXT_MUTE_STATUS_NOT"] = "NO",
-                ["IQCHAT_CONTEXT_MUTE_STATUS_TITLE"] = "Bloqueo del chat",
-                ["IQCHAT_CONTEXT_IGNORED_STATUS_COUNT"] = "<size=11>{0}</size> humano (а)",
-                ["IQCHAT_CONTEXT_IGNORED_STATUS_TITLE"] = "Ignorando",
-                ["IQCHAT_CONTEXT_NICK_DISPLAY_TITLE"] = "Su apodo",
-                ["IQCHAT_CONTEXT_NICK_DISPLAY_MESSAGE"] = "Me encanta Zoxiland",
-                ["IQCHAT_CONTEXT_SLIDER_PREFIX_TITLE"] = "Prefijo",
-                ["IQCHAT_CONTEXT_SLIDER_NICK_COLOR_TITLE"] = "Nick",
-                ["IQCHAT_CONTEXT_SLIDER_MESSAGE_COLOR_TITLE"] = "Mensaje",
-                ["IQCHAT_CONTEXT_SLIDER_IQRANK_TITLE"] = "Rango",
-                ["IQCHAT_CONTEXT_SLIDER_IQRANK_TITLE_NULLER"] = "Ausente",
-                ["IQCHAT_CONTEXT_SLIDER_PREFIX_TITLE_DESCRIPTION"] = "Elegir un prefijo",
-                ["IQCHAT_CONTEXT_SLIDER_CHAT_NICK_TITLE_DESCRIPTION"] = "Elegir un color de apodo",
-                ["IQCHAT_CONTEXT_SLIDER_CHAT_MESSAGE_TITLE_DESCRIPTION"] = "Selección del color del chat",
-                ["IQCHAT_CONTEXT_SLIDER_IQRANK_TITLE_DESCRIPTION"] = "Selección de rangos",
-                ["IQCHAT_CONTEXT_DESCRIPTION_PREFIX"] = "Ajuste del prefijo",
-                ["IQCHAT_CONTEXT_DESCRIPTION_NICK"] = "Configurar un apodo",
-                ["IQCHAT_CONTEXT_DESCRIPTION_CHAT"] = "Configurar un mensaje",
-                ["IQCHAT_CONTEXT_DESCRIPTION_RANK"] = "Establecimiento del rango",
-                ["IQCHAT_ALERT_TITLE"] = "ALERTA",
-                ["IQCHAT_TITLE_IGNORE_AND_MUTE_MUTED"] = "GESTIÓN MUTEADOS",
-                ["IQCHAT_TITLE_IGNORE_AND_MUTE_IGNORED"] = "GESTIÓN IGNORE",
-                ["IQCHAT_TITLE_IGNORE_TITLES"] = "<b>¿REALMENTE QUIERES IGNORAR\n{0}?</b>",
-                ["IQCHAT_TITLE_IGNORE_TITLES_UNLOCK"] = "<b>¿QUIERES QUITARLE AL JUGADOR LO DE IGNORAR?\n{0}?</b>",
-                ["IQCHAT_TITLE_IGNORE_BUTTON_YES"] = "<b>SÍ, QUIERO</b>",
-                ["IQCHAT_TITLE_IGNORE_BUTTON_NO"] = "<b>NO, HE CAMBIADO DE OPINIÓN</b>",
-                ["IQCHAT_TITLE_MODERATION_PANEL"] = "PANEL DE MODERADORES",
-                ["IQCHAT_BUTTON_MODERATION_MUTE_MENU"] = "Menu de muteados",
-                ["IQCHAT_BUTTON_MODERATION_MUTE_MENU_TITLE_ALERT"] = "SELECCIONE UNA ACCIÓN",
-                ["IQCHAT_BUTTON_MODERATION_MUTE_MENU_TITLE_ALERT_REASON"] = "SELECCIONE EL MOTIVO DEL BLOQUEO",
-                ["IQCHAT_BUTTON_MODERATION_MUTE_MENU_TITLE_ALERT_CHAT"] = "Bloquear el Chat",
-                ["IQCHAT_BUTTON_MODERATION_MUTE_MENU_TITLE_ALERT_VOICE"] = "Bloquear Voz",
-                ["IQCHAT_BUTTON_MODERATION_UNMUTE_MENU_TITLE_ALERT_CHAT"] = "Desbloquear Chat",
-                ["IQCHAT_BUTTON_MODERATION_UNMUTE_MENU_TITLE_ALERT_VOICE"] = "Desbloquear Voz",
-                ["IQCHAT_BUTTON_MODERATION_MUTE_ALL_CHAT"] = "Bloquear todos los chats",
-                ["IQCHAT_BUTTON_MODERATION_UNMUTE_ALL_CHAT"] = "Desbloquear todo el chat",
-                ["IQCHAT_BUTTON_MODERATION_MUTE_ALL_VOICE"] = "Bloquear la voz de todos",
-                ["IQCHAT_BUTTON_MODERATION_UNMUTE_ALL_VOICE"] = "Desbloquear la voz de todos",
-                ["IQCHAT_FUNCED_NO_SEND_CHAT_MUTED"] = "Tienes un bloqueo de chat activo : {0}",
-                ["IQCHAT_FUNCED_NO_SEND_CHAT_MUTED_ALL_CHAT"] = "El administrador ha bloqueado el chat. Espera el desbloqueo completo",
-                ["IQCHAT_FUNCED_NO_SEND_CHAT_MUTED_ALL_VOICE"] = "El administrador ha bloqueado el chat de voz. Espera el desbloqueo completo",
-                ["IQCHAT_FUNCED_NO_SEND_CHAT_UMMUTED_ALL_VOICE"] = "El administrador ha desbloqueado el chat de voz.",
-                ["IQCHAT_FUNCED_NO_SEND_CHAT_UNMUTED_ALL_CHAT"] = "El administrador ha desbloqueado el chat",
-                ["IQCHAT_FUNCED_ALERT_TITLE"] = "<color=#a7f64f><b>[MENCIÓN de {0}]</b></color>",
-                ["IQCHAT_FUNCED_ALERT_TITLE_ISMUTED"] = "El jugador ya ha sido silenciado.",
-                ["IQCHAT_FUNCED_ALERT_TITLE_SERVER"] = "Administrador",
-                ["IQCHAT_INFO_ONLINE"] = "Now on the server :\n{0}",
-                ["IQCHAT_INFO_ANTI_NOOB"] = "Tienes que jugar un poco mas para poder hablar por el chat {0}.",
-                ["IQCHAT_INFO_ANTI_NOOB_PM"] = "No puedes enviar un privado por que es un jugador nuevo.",
-                ["SKILLTREE_SYNTAX_LEVEL"] = "[{0} Nivel]",
-                ["SKILLTREE_SYNTAX_PRESTIGE_LEVEL"] = "[{0} prestige]",
-                ["SKILLTREE_SYNTAX_XP"] = "[{0} XP]",
-                ["XLEVELS_SYNTAX_PREFIX"] = "[{0} Nivel]",
-                ["CLANS_SYNTAX_PREFIX"] = "[{0}]",
-                ["XPRISON_SYNTAX_PREFIX"] = "<color=orange>[{0}]</color>",
-
-
-            }, this, "es-ES");
-
-            PrintWarning(LanguageEn ? "Language file uploaded successfully" : "Языковой файл загружен успешно");
-        }
-
-        
-                private void DrawUI_IQChat_Sliders(BasePlayer player, String Name, String OffsetMin, String OffsetMax, TakeElementUser ElementType)
-        {
-            String Interface = InterfaceBuilder.GetInterface("UI_Chat_Slider");
-            if (Interface == null) return;
-
-            Interface = Interface.Replace("%OFFSET_MIN%", OffsetMin);
-            Interface = Interface.Replace("%OFFSET_MAX%", OffsetMax);
-            Interface = Interface.Replace("%NAME%", Name);
-            Interface = Interface.Replace("%COMMAND_LEFT_SLIDE%", $"newui.cmd slider.controller {ElementType} -");
-            Interface = Interface.Replace("%COMMAND_RIGHT_SLIDE%", $"newui.cmd slider.controller {ElementType} +");
-
-            CuiHelper.DestroyUi(player, Name);
-            CuiHelper.AddUi(player, Interface);
-
-            DrawUI_IQChat_Slider_Update_Argument(player, ElementType);
-        }
-        
-                private void MutePlayer(BasePlayer Target, MuteType Type, Int32 ReasonIndex, BasePlayer Moderator = null, String ReasonCustom = null, Int32 TimeCustom = 0, Boolean HideMute = false, Boolean Command = false, String fakeUserId = "")
-        {
-            Configuration.ControllerMute ControllerMutes = config.ControllerMutes;
-
-            if (IsReadyIQFakeActive() && Target == null && !String.IsNullOrWhiteSpace(fakeUserId))
-            {
-                ReplySystem(Moderator, GetLang(Type == MuteType.Chat ? "FUNC_MESSAGE_MUTE_CHAT" : "FUNC_MESSAGE_MUTE_VOICE", Moderator != null ? Moderator.displayName : Moderator.UserIDString, GetLang("IQCHAT_FUNCED_ALERT_TITLE_SERVER"), GetFakeName(fakeUserId), FormatTime(TimeCustom == 0 ? config.ControllerMutes.MuteChatReasons[ReasonIndex].SecondMute : TimeCustom), ReasonCustom ?? config.ControllerMutes.MuteChatReasons[ReasonIndex].Reason));
-                SetMuteFakeUser(fakeUserId, true);
-                return;
-            }
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            if (!UserInformation.ContainsKey(Target.userID)) return;
-            User Info = UserInformation[Target.userID];
-
-            String LangMessage = String.Empty;
-            String Reason = String.Empty;
-            Int32 MuteTime = 0;
-            
-            String NameModerator = GetLang("IQCHAT_FUNCED_ALERT_TITLE_SERVER", Target.UserIDString);
-
-            if (Moderator != null)
-            {
-                if (!permission.UserHasPermission(Moderator.UserIDString, PermissionHideMuteName))
-                {
-                    GeneralInformation.RenameInfo ModeratorRename = GeneralInfo.GetInfoRename(Moderator.userID);
-                    NameModerator = ModeratorRename != null ? $"{ModeratorRename.RenameNick ?? Moderator.displayName}" : Moderator.displayName;
-                }
-            }
-
-            GeneralInformation.RenameInfo TagetRename = GeneralInfo.GetInfoRename(Target.userID);
-            String TargetName = TagetRename != null ? $"{TagetRename.RenameNick ?? Target.displayName}" : Target.displayName;
-
-            if (Target == null || !Target.IsConnected)
-            {
-                if (Moderator != null && !Command)
-                    ReplySystem(Moderator, GetLang("UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_CHAT_ACTION_NOT_CONNNECTED", Moderator.UserIDString));
-                return;
-            }
-
-            if (Moderator != null && !Command)
-                if (Info.MuteInfo.IsMute(Type))
-                {
-                    ReplySystem(Moderator, GetLang("IQCHAT_FUNCED_ALERT_TITLE_ISMUTED", Moderator.UserIDString));
-                    return;
-                }
-
-            switch (Type)
-            {
-                case MuteType.Chat:
-                    {
-                        Reason = ReasonCustom ?? ControllerMutes.MuteChatReasons[ReasonIndex].Reason;
-                        MuteTime = TimeCustom == 0 ? ControllerMutes.MuteChatReasons[ReasonIndex].SecondMute : TimeCustom;
-                        LangMessage = "FUNC_MESSAGE_MUTE_CHAT";
-                        break;
-                    }
-                case MuteType.Voice:
-                    {
-                        Reason = ReasonCustom ?? ControllerMutes.MuteVoiceReasons[ReasonIndex].Reason;
-                        MuteTime = TimeCustom == 0 ? ControllerMutes.MuteVoiceReasons[ReasonIndex].SecondMute : TimeCustom;
-                        LangMessage = "FUNC_MESSAGE_MUTE_VOICE";
-                        break;
-                    }
-            }
-
-            Info.MuteInfo.SetMute(Type, MuteTime);
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            if (Moderator != null && Moderator != Target)
-                Interface.Oxide.CallHook("OnPlayerMuted", Target, Moderator, MuteTime, Reason);
-
-            if (!HideMute)
-                ReplyBroadcast(null, null, false, LangMessage, NameModerator, TargetName, FormatTime(MuteTime, Target.UserIDString), Reason);
-               // ReplyBroadcast(GetLang(LangMessage, Target.UserIDString, NameModerator, TargetName, FormatTime(MuteTime, Target.UserIDString), Reason));
-            else
-            {
-                if (Target != null)
-                    ReplySystem(Target, GetLang(LangMessage, Target.UserIDString, NameModerator, TargetName, FormatTime(MuteTime, Target.UserIDString), Reason));
-
-                if (Moderator != null)
-                    ReplySystem(Moderator, GetLang(LangMessage, Target.UserIDString, NameModerator, TargetName, FormatTime(MuteTime, Target.UserIDString), Reason));
-            }
-
-            DiscordLoggMuted(Target, Type, Reason, FormatTime(MuteTime, Target.UserIDString), Moderator);
-        }
-        private String SkillTree_GetLevel(BasePlayer player)
-        {
-            String[] infoSkills = GetInfoSkillTree(player);
-            if(infoSkills == null) return String.Empty;
-            String levelSkillTree = GetLang("SKILLTREE_SYNTAX_LEVEL", player.UserIDString, infoSkills.First());
-            
-            Object resultColorMessage = IsGradientColorValue(config.ReferenceSetting.skillTreeSettings.colorTag);
-            if (resultColorMessage is List<String> gradientColors)
-                levelSkillTree = ApplyGradientToText(levelSkillTree, gradientColors);
-            else levelSkillTree = $"<color={config.ReferenceSetting.skillTreeSettings.colorTag}>{levelSkillTree}</color>";
-
-            return levelSkillTree;
-        }
-        
-        private void AlertController(BasePlayer player)
-        {
-            Object status = Interface.CallHook("OnChatAlertConnected", player);
-            if (status != null)
-                return;
-            
-            Configuration.ControllerAlert.AdminSession AlertSessionAdmin = config.ControllerAlertSetting.AdminSessionSetting;
-            Configuration.ControllerAlert.PlayerSession AlertSessionPlayer = config.ControllerAlertSetting.PlayerSessionSetting;
-            Configuration.ControllerAlert.PersonalAlert AlertPersonal = config.ControllerAlertSetting.PersonalAlertSetting;
-            GeneralInformation.RenameInfo RenameInformation = GeneralInfo.GetInfoRename(player.userID);
-
-            String DisplayName = player.displayName;
-
-            UInt64 UserID = player.userID;
-            if (RenameInformation != null)
-            {
-                DisplayName = RenameInformation.RenameNick;
-                UserID = RenameInformation.RenameID;
-            }
-
-            if (AlertSessionPlayer.ConnectedAlert)
-            {
-                if (!AlertSessionAdmin.ConnectedAlertAdmin)
-                    if (player.IsAdmin) return;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                String Avatar = AlertSessionPlayer.ConnectedAvatarUse ? UserID.ToString() : String.Empty;
-
-                if (AlertSessionPlayer.ConnectedWorld)
-                {
-                    String ipPlayer = player.IPlayer.Address;
-
-                    if (player.net?.connection != null)
-                    {
-                        String[] ipPortPlayer = player.net.connection.ipaddress.Split(':');
-                        if (ipPortPlayer.Length >= 1)
-                            ipPlayer = ipPortPlayer[0]; 
-                    }
-                    
-                    webrequest.Enqueue("http://ip-api.com/json/" + ipPlayer, null, (code, response) =>
-                    {
-                        if (code != 200 || response == null)
-                            return;
-
-                        String country = JsonConvert.DeserializeObject<Response>(response).Country;
-
-                        if (!permission.UserHasPermission(player.UserIDString, PermissionHideConnection))
-                        {
-                            if (AlertSessionPlayer.ConnectionAlertRandom)
-                                ReplyBroadcast(null, Avatar, false, AlertSessionPlayer.RandomConnectionAlert.LanguageMessages,DisplayName, country ?? "none");
-                            else ReplyBroadcast(null, Avatar, false, "WELCOME_PLAYER_WORLD", DisplayName, country ?? "none");
-                        }
-
-                        Log($"[{player.userID}] {GetLang("WELCOME_PLAYER_WORLD", "", DisplayName, country ?? "none")}");
-                    }, this);
-                }
-                else
-                {
-                    if (!permission.UserHasPermission(player.UserIDString, PermissionHideConnection))
-                    {
-                        if (AlertSessionPlayer.ConnectionAlertRandom)
-                            ReplyBroadcast(null, Avatar, false,AlertSessionPlayer.RandomConnectionAlert.LanguageMessages, DisplayName);
-                        else ReplyBroadcast(null, Avatar, false, "WELCOME_PLAYER", DisplayName);
-                    }
-
-                    Log($"[{player.userID}] {GetLang("WELCOME_PLAYER", "", DisplayName)}");
-                }
-            }
-            if (AlertPersonal.UseWelcomeMessage)
-            {
-                String WelcomeMessage = GetMessages(player, AlertPersonal.WelcomeMessage.LanguageMessages);
-                if (String.IsNullOrWhiteSpace(WelcomeMessage)) return;
-                ReplySystem(player, WelcomeMessage);
-            }
+            Prefix,
+            Nick,
+            Chat,
+            Rank,
+            MultiPrefix
         }
         public Dictionary<BasePlayer, BasePlayer> PMHistory = new Dictionary<BasePlayer, BasePlayer>();
 
-        
-                
-        private void Log(String LoggedMessage) => LogToFile("IQChatLogs", $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {LoggedMessage}", this);
-        private const String PermissionHideConnection = "iqchat.hideconnection";
-
-        [ConsoleCommand("online")]
-        private void ShowPlayerOnlineConsole(ConsoleSystem.Arg arg)
-        {
-            if (!config.OtherSetting.UseCommandOnline) return;
-
-            BasePlayer player = arg.Player();
-            String Message = String.Empty;
-            
-            if (config.OtherSetting.UseCommandShortOnline)
-            {
-                Int32 shortCount = GetPlayersOnlineShort();
-                Message = GetLang("IQCHAT_INFO_ONLINE", player != null ? player.UserIDString : null, $"{shortCount}");
-            }
-            else
-            {
-                List<String> PlayerNames = GetPlayersOnline();
-                Message = GetLang("IQCHAT_INFO_ONLINE", player != null ? player.UserIDString : null, String.Join($"\n", PlayerNames));
-            }
-
-            if (player != null)
-                player.ConsoleMessage(Message);
-            else
-            {
-                String Pattern = @"</?size.*?>|</?color.*?>";
-                String Messages = Regex.IsMatch(Message, Pattern) ? Regex.Replace(Message, Pattern, "") : Message;
-                Puts(Messages);
-            }
-        }
-        public String FormatTime(Double Second, String UserID = null)
-        {
-            TimeSpan time = TimeSpan.FromSeconds(Second);
-            String Result = String.Empty;
-            String Days = GetLang("TITLE_FORMAT_DAYS", UserID);
-            String Hourse = GetLang("TITLE_FORMAT_HOURSE", UserID);
-            String Minutes = GetLang("TITLE_FORMAT_MINUTES", UserID);
-            String Seconds = GetLang("TITLE_FORMAT_SECONDS", UserID);
-
-            if (time.Seconds != 0)
-                Result = $"{Format(time.Seconds, Seconds, Seconds, Seconds)}";
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            if (time.Minutes != 0)
-                Result = $"{Format(time.Minutes, Minutes, Minutes, Minutes)}";
-
-            if (time.Hours != 0)
-                Result = $"{Format(time.Hours, Hourse, Hourse, Hourse)}";
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            if (time.Days != 0)
-                Result = $"{Format(time.Days, Days, Days, Days)}";
-
-            return Result;
-        }
-        private class Configuration
-        {
-                        [JsonProperty(LanguageEn ? "Setting up player information" : "Настройка информации о игроке")]
-            public ControllerConnection ControllerConnect = new ControllerConnection();
-            internal class ControllerConnection
-            {
-                [JsonProperty(LanguageEn ? "Function switches" : "Перключатели функций")]
-                public Turned Turneds = new Turned();
-                [JsonProperty(LanguageEn ? "Setting Standard Values" : "Настройка стандартных значений")]
-                public SetupDefault SetupDefaults = new SetupDefault();
-
-                internal class SetupDefault
-                {
-                    [JsonProperty(LanguageEn ? "This prefix will be set if the player entered the server for the first time or in case of expiration of the rights to the prefix that he had earlier" : "Данный префикс установится если игрок впервые зашел на сервер или в случае окончания прав на префикс, который у него стоял ранее")]
-                    public String PrefixDefault = "<color=#CC99FF>[ИГРОК]</color>";
-                    [JsonProperty(LanguageEn ? "This nickname color will be set if the player entered the server for the first time or in case of expiration of the rights to the nickname color that he had earlier" : "Данный цвет ника установится если игрок впервые зашел на сервер или в случае окончания прав на цвет ника, который у него стоял ранее")]
-                    public String NickDefault = "#33CCCC";
-                    [JsonProperty(LanguageEn ? "This chat color will be set if the player entered the server for the first time or in case of expiration of the rights to the chat color that he had earlier" : "Данный цвет чата установится если игрок впервые зашел на сервер или в случае окончания прав на цвет чата, который у него стоял ранее")]
-                    public String MessageDefault = "#0099FF";
-                }
-                internal class Turned
-                {
-                    [JsonProperty(LanguageEn ? "Set automatically a prefix to a player when he got the rights to it" : "Устанавливать автоматически префикс игроку, когда он получил права на него")]
-                    public Boolean TurnAutoSetupPrefix;
-                    [JsonProperty(LanguageEn ? "Set automatically the color of the nickname to the player when he got the rights to it" : "Устанавливать автоматически цвет ника игроку, когда он получил права на него")]
-                    public Boolean TurnAutoSetupColorNick;
-                    [JsonProperty(LanguageEn ? "Set the chat color automatically to the player when he got the rights to it" : "Устанавливать автоматически цвет чата игроку, когда он получил права на него")]
-                    public Boolean TurnAutoSetupColorChat;
-                    [JsonProperty(LanguageEn ? "Automatically reset the prefix when the player's rights to it expire" : "Сбрасывать автоматически префикс при окончании прав на него у игрока")]
-                    public Boolean TurnAutoDropPrefix;
-                    [JsonProperty(LanguageEn ? "Automatically reset the color of the nickname when the player's rights to it expire" : "Сбрасывать автоматически цвет ника при окончании прав на него у игрока")]
-                    public Boolean TurnAutoDropColorNick;
-                    [JsonProperty(LanguageEn ? "Automatically reset the color of the chat when the rights to it from the player expire" : "Сбрасывать автоматически цвет чата при окончании прав на него у игрока")]
-                    public Boolean TurnAutoDropColorChat;
-                }
-            }
-            
-                        [JsonProperty(LanguageEn ? "Setting options for the player" : "Настройка параметров для игрока")]
-            public ControllerParameters ControllerParameter = new ControllerParameters();
-            internal class ControllerParameters
-            {
-                [JsonProperty(LanguageEn ? "Setting the display of options for player selection" : "Настройка отображения параметров для выбора игрока")]
-                public VisualSettingParametres VisualParametres = new VisualSettingParametres();
-                [JsonProperty(LanguageEn ? "List and customization of colors for a nickname" : "Список и настройка цветов для ника")]
-                public List<AdvancedFuncion> NickColorList = new List<AdvancedFuncion>();
-                [JsonProperty(LanguageEn ? "List and customize colors for chat messages" : "Список и настройка цветов для сообщений в чате")]
-                public List<AdvancedFuncion> MessageColorList = new List<AdvancedFuncion>();
-                [JsonProperty(LanguageEn ? "List and configuration of prefixes in chat" : "Список и настройка префиксов в чате")]
-                public PrefixSetting Prefixes = new PrefixSetting();
-                internal class PrefixSetting
-                {
-                    [JsonProperty(LanguageEn ? "Enable support for multiple prefixes at once (true - multiple prefixes can be set/false - only 1 can be set to choose from)" : "Включить поддержку нескольких префиксов сразу (true - можно установить несколько префиксов/false - установить можно только 1 на выбор)")]
-                    public Boolean TurnMultiPrefixes;
-                    [JsonProperty(LanguageEn ? "The maximum number of prefixes that can be set at a time (This option only works if setting multiple prefixes is enabled)" : "Максимальное количество префиксов, которое можно установить за раз(Данный параметр работает только если включена установка нескольких префиксов)")]
-                    public Int32 MaximumMultiPrefixCount;
-                    [JsonProperty(LanguageEn ? "List of prefixes and their settings" : "Список префиксов и их настройка")]
-                    public List<AdvancedFuncion> Prefixes = new List<AdvancedFuncion>();
-                }
-
-                internal class AdvancedFuncion
-                {
-                    [JsonProperty(LanguageEn ? "Permission" : "Права")]
-                    public String Permissions;
-                    [JsonProperty(LanguageEn ? "Argument" : "Значение")]
-                    public String Argument;
-                    [JsonProperty(LanguageEn ? "Block the player's ability to select this parameter in the plugin menu (true - yes/false - no)" : "Заблокировать возможность выбрать данный параметр игроком в меню плагина (true - да/false - нет)")]
-                    public Boolean IsBlockSelected;
-                }
-
-                internal class VisualSettingParametres
-                {
-                    [JsonProperty(LanguageEn ? "Player prefix selection display type - (0 - dropdown list, 1 - slider (Please note that if you have multi-prefix enabled, the dropdown list will be set))" : "Тип отображения выбора префикса для игрока - (0 - выпадающий список, 1 - слайдер (Учтите, что если у вас включен мульти-префикс, будет установлен выпадающий список))")]
-                    public SelectedParametres PrefixType;
-                    [JsonProperty(LanguageEn ? "Display type of player's nickname color selection - (0 - drop-down list, 1 - slider)" : "Тип отображения выбора цвета ника для игрока - (0 - выпадающий список, 1 - слайдер)")]
-                    public SelectedParametres NickColorType;
-                    [JsonProperty(LanguageEn ? "Display type of message color choice for the player - (0 - drop-down list, 1 - slider)" : "Тип отображения выбора цвета сообщения для игрока - (0 - выпадающий список, 1 - слайдер)")]
-                    public SelectedParametres ChatColorType;
-                    [JsonProperty(LanguageEn ? "IQRankSystem : Player rank selection display type - (0 - drop-down list, 1 - slider)" : "IQRankSystem : Тип отображения выбора ранга для игрока - (0 - выпадающий список, 1 - слайдер)")]
-                    public SelectedParametres IQRankSystemType;
-                }
-            }
-            
-                        [JsonProperty(LanguageEn ? "Plugin mute settings" : "Настройка мута в плагине")]
-            public ControllerMute ControllerMutes = new ControllerMute();
-            internal class ControllerMute
-            {
-                [JsonProperty(LanguageEn ? "Prohibit sending messages in /pm and /r if the player's chat is blocked" : "Запрещать отправлять сообщения в /pm, /r - если у игрока заблокирован чат")]
-                public Boolean mutedPM;
-                [JsonProperty(LanguageEn ? "Setting up automatic muting" : "Настройка автоматического мута")]
-                public AutoMute AutoMuteSettings = new AutoMute();
-                internal class AutoMute
-                {
-                    [JsonProperty(LanguageEn ? "Enable automatic muting for forbidden words (true - yes/false - no)" : "Включить автоматический мут по запрещенным словам(true - да/false - нет)")]
-                    public Boolean UseAutoMute;
-                    [JsonProperty(LanguageEn ? "Reason for automatic muting" : "Причина автоматического мута")]
-                    public Muted AutoMuted;
-                }
-                [JsonProperty(LanguageEn ? "Additional setting for logging about mutes in discord" : "Дополнительная настройка для логирования о мутах в дискорд")]
-                public LoggedFuncion LoggedMute = new LoggedFuncion();
-                internal class LoggedFuncion
-                {
-                    [JsonProperty(LanguageEn ? "Support for logging the last N messages (Discord logging about mutes must be enabled)" : "Поддержка логирования последних N сообщений (Должно быть включено логирование в дискорд о мутах)")]
-                    public Boolean UseHistoryMessage;
-                    [JsonProperty(LanguageEn ? "How many latest player messages to send in logging" : "Сколько последних сообщений игрока отправлять в логировании")]
-                    public Int32 CountHistoryMessage;
-                }
-
-                [JsonProperty(LanguageEn ? "Reasons to block chat" : "Причины для блокировки чата")]
-                public List<Muted> MuteChatReasons = new List<Muted>();
-                [JsonProperty(LanguageEn ? "Reasons to block your voice" : "Причины для блокировки голоса")]
-                public List<Muted> MuteVoiceReasons = new List<Muted>();
-                internal class Muted
-                {
-                    [JsonProperty(LanguageEn ? "Reason for blocking" : "Причина для блокировки")]
-                    public String Reason;
-                    [JsonProperty(LanguageEn ? "Block time (in seconds)" : "Время блокировки(в секундах)")]
-                    public Int32 SecondMute;
-                }
-            }
-            
-                        [JsonProperty(LanguageEn ? "Configuring Message Processing" : "Настройка обработки сообщений")]
-            public ControllerMessage ControllerMessages = new ControllerMessage();
-            internal class ControllerMessage
-            {
-                [JsonProperty(LanguageEn ? "Basic settings for chat messages from the plugin" : "Основная настройка сообщений в чат от плагина")]
-                public GeneralSettings GeneralSetting = new GeneralSettings();
-                [JsonProperty(LanguageEn ? "Configuring functionality switching in chat" : "Настройка переключения функционала в чате")]
-                public TurnedFuncional TurnedFunc = new TurnedFuncional();
-                [JsonProperty(LanguageEn ? "Player message formatting settings" : "Настройка форматирования сообщений игроков")]
-                public FormattingMessage Formatting = new FormattingMessage();
-  
-                
-                internal class GeneralSettings
-                {
-                    [JsonProperty(LanguageEn ? "Notify the player in chat about receiving a prefix/nickname color/chat color (true - yes/false - no)" : "Уведомлять игрока в чате о получении префикса/цвета ника/цвета чата (true - да/false - нет)")]
-                    public Boolean alertArgumentsInfoSetup;
-                    [JsonProperty(LanguageEn ? "Notify the player in chat about the end of a prefix/nickname color/chat color (true - yes/false - no)" : "Уведомлять игрока в чате о окончании префикса/цвета ника/цвета чата (true - да/false - нет)")]
-                    public Boolean alertArgumentsInfoRemove;
-                    [JsonProperty(LanguageEn ? "Customizing the chat alert format" : "Настройка формата оповещения в чате")]
-                    public BroadcastSettings BroadcastFormat = new BroadcastSettings();
-                    [JsonProperty(LanguageEn ? "Setting the mention format in the chat, via @" : "Настройка формата упоминания в чате, через @")]
-                    public AlertSettings AlertFormat = new AlertSettings();
-                    [JsonProperty(LanguageEn ? "Additional setting" : "Дополнительная настройка")]
-                    public OtherSettings OtherSetting = new OtherSettings();
-
-                    internal class BroadcastSettings
-                    {
-                        [JsonProperty(LanguageEn ? "The name of the notification in the chat" : "Наименование оповещения в чат")]
-                        public String BroadcastTitle;
-                        [JsonProperty(LanguageEn ? "Chat alert message color" : "Цвет сообщения оповещения в чат")]
-                        public String BroadcastColor;
-                        [JsonProperty(LanguageEn ? "Steam64ID for chat avatar" : "Steam64ID для аватарки в чате")]
-                        public String Steam64IDAvatar;
-                    }
-                    internal class AlertSettings
-                    {
-                        [JsonProperty(LanguageEn ? "The color of the player mention message in the chat" : "Цвет сообщения упоминания игрока в чате")]
-                        public String AlertPlayerColor;
-                        [JsonProperty(LanguageEn ? "Sound when receiving and sending a mention via @" : "Звук при при получении и отправки упоминания через @")]
-                        public String SoundAlertPlayer;
-                    }
-                    internal class OtherSettings
-                    {
-                        [JsonProperty(LanguageEn ? "Time after which the message will be deleted from the UI from the administrator" : "Время,через которое удалится сообщение с UI от администратора")]
-                        public Int32 TimeDeleteAlertUI;
-
-                        [JsonProperty(LanguageEn ? "The size of the message from the player in the chat" : "Размер сообщения от игрока в чате")]
-                        public Int32 SizeMessage = 14;
-                        [JsonProperty(LanguageEn ? "Player nickname size in chat" : "Размер ника игрока в чате")]
-                        public Int32 SizeNick = 14;
-                        [JsonProperty(LanguageEn ? "The size of the player's prefix in the chat (will be used if <size=N></size> is not set in the prefix itself)" : "Размер префикса игрока в чате (будет использовано, если в самом префиксе не установвлен <size=N></size>)")]
-                        public Int32 SizePrefix = 14;
-
-                        [JsonProperty(LanguageEn ? "Nickname size according to privilege [permission] = size" : "Размер ника по привилегии [permission] = размер")]
-                        public Dictionary<String, Int32> sizeNickPrivilages = new Dictionary<String, Int32>();
-                        [JsonProperty(LanguageEn ? "Chat message size according to privilege [permission] = size" : "Размер сообщения в чате по привилегии [permission] = размер")]
-                        public Dictionary<String, Int32> sizeMessagePrivilages = new Dictionary<String, Int32>();
-
-                        public Int32 GetSizeNickOrMessage(BasePlayer player, Boolean nickOrMessage)
-                        {
-                            Dictionary<String, Int32> sizePrivilage =
-                                nickOrMessage ? sizeNickPrivilages : sizeMessagePrivilages;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                            if(sizePrivilage != null && sizePrivilage.Count != 0)
-                                foreach (KeyValuePair<String, Int32> privilage in sizePrivilage)
-                                {
-                                    if (_.permission.UserHasPermission(player.UserIDString, privilage.Key))
-                                        return privilage.Value;
-                                }
-
-                            return nickOrMessage ? SizeNick : SizeMessage;
-                        }
-                    }
-                }
-                internal class TurnedFuncional
-                {
-                    [JsonProperty(LanguageEn ? "Configuring spam protection" : "Настройка защиты от спама")]
-                    public AntiSpam AntiSpamSetting = new AntiSpam();
-                    [JsonProperty(LanguageEn ? "Setting up a temporary chat block for newbies (who have just logged into the server)" : "Настройка временной блокировки чата новичкам (которые только зашли на сервер)")]
-                    public AntiNoob AntiNoobSetting = new AntiNoob();
-                    [JsonProperty(LanguageEn ? "Setting up private messages" : "Настройка личных сообщений")]
-                    public PM PMSetting = new PM();
-
-                    internal class AntiNoob
-                    {
-                        [JsonProperty(LanguageEn ? "Newbie protection in PM/R" : "Защита от новичка в PM/R")]
-                        public Settings AntiNoobPM = new Settings();
-                        [JsonProperty(LanguageEn ? "Newbie protection in global and team chat" : "Защита от новичка в глобальном и коммандном чате")]
-                        public Settings AntiNoobChat = new Settings();
-                        internal class Settings
-                        {
-                            [JsonProperty(LanguageEn ? "Enable protection?" : "Включить защиту?")]
-                            public Boolean AntiNoobActivate = false;
-                            [JsonProperty(LanguageEn ? "Newbie Chat Lock Time" : "Время блокировки чата для новичка")]
-                            public Int32 TimeBlocked = 1200;
-                        }
-                    }
-                    internal class AntiSpam
-                    {
-                        [JsonProperty(LanguageEn ? "Enable spam protection (Anti-spam)" : "Включить защиту от спама (Анти-спам)")]
-                        public Boolean AntiSpamActivate;
-                        [JsonProperty(LanguageEn ? "Time after which a player can send a message (AntiSpam)" : "Время через которое игрок может отправлять сообщение (АнтиСпам)")]
-                        public Int32 FloodTime;
-                        [JsonProperty(LanguageEn ? "Additional Anti-Spam settings" : "Дополнительная настройка Анти-Спама")]
-                        public AntiSpamDuples AntiSpamDuplesSetting = new AntiSpamDuples();
-                        internal class AntiSpamDuples
-                        {
-                            [JsonProperty(LanguageEn ? "Enable additional spam protection (Anti-duplicates, duplicate messages)" : "Включить дополнительную защиту от спама (Анти-дубликаты, повторяющие сообщения)")]
-                            public Boolean AntiSpamDuplesActivate = true;
-                            [JsonProperty(LanguageEn ? "How many duplicate messages does a player need to make to be confused by the system" : "Сколько дублирующих сообщений нужно сделать игроку чтобы его замутила система")]
-                            public Int32 TryDuples = 3;
-                            [JsonProperty(LanguageEn ? "Setting up automatic muting for duplicates" : "Настройка автоматического мута за дубликаты")]
-                            public ControllerMute.Muted MuteSetting = new ControllerMute.Muted
-                            {
-                                Reason = LanguageEn ? "Blocking for duplicate messages (SPAM)" : "Блокировка за дублирующие сообщения (СПАМ)",
-                                SecondMute = 300,
-                            };
-                        }
-                    }
-                    internal class PM
-                    {
-                        [JsonProperty(LanguageEn ? "Enable Private Messages" : "Включить личные сообщения")]
-                        public Boolean PMActivate;
-                        [JsonProperty(LanguageEn ? "Sound when receiving a private message" : "Звук при при получении личного сообщения")]
-                        public String SoundPM;
-                    }
-                    [JsonProperty(LanguageEn ? "Enable PM ignore for players (/ignore nick or via interface)" : "Включить игнор ЛС игрокам(/ignore nick или через интерфейс)")]
-                    public Boolean IgnoreUsePM;
-                    [JsonProperty(LanguageEn ? "Hide the issue of items to the Admin from the chat" : "Скрыть из чата выдачу предметов Админу")]
-                    public Boolean HideAdminGave;
-                    [JsonProperty(LanguageEn ? "Move mute to team chat (In case of a mute, the player will not be able to write even to the team chat)" : "Переносить мут в командный чат(В случае мута, игрок не сможет писать даже в командный чат)")]
-                    public Boolean MuteTeamChat;
-                }
-                internal class FormattingMessage
-                {
-                    [JsonProperty(LanguageEn ? "Enable message formatting [Will control caps, message format] (true - yes/false - no)" : "Включить форматирование сообщений [Будет контроллировать капс, формат сообщения] (true - да/false - нет)")]
-                    public Boolean FormatMessage;
-                    [JsonProperty(LanguageEn ? "Use a list of banned words (true - yes/false - no)" : "Использовать список запрещенных слов (true - да/false - нет)")]
-                    public Boolean UseBadWords;
-                    [JsonProperty(LanguageEn ? "The word that will replace the forbidden word" : "Слово которое будет заменять запрещенное слово")]
-                    public String ReplaceBadWord;
-                    [JsonProperty(LanguageEn ? "The list of forbidden words [Forbidden Word] = Whether to replace it in part of the word (for example, Vasya Fucking => Vasya ***) (true - yes/false - no)" : "Список запрещенных слов [ЗапрещенноеСлово] = Заменять ли его в части слова (например ВасяБля => Вася***) (true - да/false - нет)")]
-                    public Dictionary<String, Boolean> BadWords = new Dictionary<String, Boolean>();
-
-                    [JsonProperty(LanguageEn ? "Nickname controller setup" : "Настройка контроллера ников")]
-                    public NickController ControllerNickname = new NickController();
-                    internal class NickController
-                    {
-                        [JsonProperty(LanguageEn ? "Enable player nickname formatting (message formatting must be enabled)" : "Включить форматирование ников игроков (должно быть включено форматирование сообщений)")]
-                        public Boolean UseNickController = true;
-                        [JsonProperty(LanguageEn ? "The word that will replace the forbidden word (You can leave it blank and it will just delete)" : "Слово которое будет заменять запрещенное слово (Вы можете оставить пустым и будет просто удалять)")]
-                        public String ReplaceBadNick = "****";
-                        [JsonProperty(LanguageEn ? "The list of forbidden nicknames [Forbidden Word] = Whether to replace it in part of the word (for example, Vasya Fucking => Vasya ***) (true - yes/false - no)" : "Список запрещенных ников [ЗапрещенноеСлово] = Заменять ли его в части слова (например ВасяБля => Вася***) (true - да/false - нет)")]
-                        public Dictionary<String, Boolean> BadNicks = new Dictionary<String, Boolean>();
-                        [JsonProperty(LanguageEn ? "List of allowed links in nicknames" : "Список разрешенных ссылок в никах")]
-                        public List<String> AllowedLinkNick = new List<String>();
-                    }
-                }
-            }
-
-            
-            
-            [JsonProperty(LanguageEn ? "Setting up chat alerts" : "Настройка оповещений в чате")]
-            public ControllerAlert ControllerAlertSetting;
-
-            internal class ControllerAlert
-            {
-                [JsonProperty(LanguageEn ? "Setting up chat alerts" : "Настройка оповещений в чате")]
-                public Alert AlertSetting;
-                [JsonProperty(LanguageEn ? "Setting notifications about the status of the player's session" : "Настройка оповещений о статусе сессии игрока")]
-                public PlayerSession PlayerSessionSetting;
-                [JsonProperty(LanguageEn ? "Configuring administrator session status alerts" : "Настройка оповещений о статусе сессии администратора")]
-                public AdminSession AdminSessionSetting;
-                [JsonProperty(LanguageEn ? "Setting up personal notifications to the player when connecting" : "Настройка персональных оповоещений игроку при коннекте")]
-                public PersonalAlert PersonalAlertSetting;
-                internal class Alert
-                {
-                    [JsonProperty(LanguageEn ? "Enable automatic messages in chat (true - yes/false - no)" : "Включить автоматические сообщения в чат (true - да/false - нет)")]
-                    public Boolean AlertMessage;
-                    [JsonProperty(LanguageEn ? "Type of automatic messages : true - sequential / false - random" : "Тип автоматических сообщений : true - поочередные/false - случайные")]
-                    public Boolean AlertMessageType;
-
-                    [JsonProperty(LanguageEn ? "List of automatic messages in chat" : "Список автоматических сообщений в чат")]
-                    public LanguageController MessageList = new LanguageController();
-                    [JsonProperty(LanguageEn ? "Interval for sending messages to chat (Broadcaster) (in seconds)" : "Интервал отправки сообщений в чат (Броадкастер) (в секундах)")]
-                    public Int32 MessageListTimer;
-                }
-                internal class PlayerSession
-                {
-                    [JsonProperty(LanguageEn ? "When a player is notified about the entry / exit of the player, display his avatar opposite the nickname (true - yes / false - no)" : "При уведомлении о входе/выходе игрока отображать его аватар напротив ника (true - да/false - нет)")]
-                    public Boolean ConnectedAvatarUse;
-
-                    [JsonProperty(LanguageEn ? "Notify in chat when a player enters (true - yes/false - no)" : "Уведомлять в чате о входе игрока (true - да/false - нет)")]
-                    public Boolean ConnectedAlert;
-                    [JsonProperty(LanguageEn ? "Enable random notifications when a player from the list enters (true - yes / false - no)" : "Включить случайные уведомления о входе игрока из списка (true - да/false - нет)")]
-                    public Boolean ConnectionAlertRandom;
-                    [JsonProperty(LanguageEn ? "Show the country of the entered player (true - yes/false - no)" : "Отображать страну зашедшего игрока (true - да/false - нет")]
-                    public Boolean ConnectedWorld;
-
-                    [JsonProperty(LanguageEn ? "Notify when a player enters the chat (selected from the list) (true - yes/false - no)" : "Уведомлять о выходе игрока в чат(выбираются из списка) (true - да/false - нет)")]
-                    public Boolean DisconnectedAlert;
-                    [JsonProperty(LanguageEn ? "Enable random player exit notifications (true - yes/false - no)" : "Включить случайные уведомления о выходе игрока (true - да/false - нет)")]
-                    public Boolean DisconnectedAlertRandom;
-                    [JsonProperty(LanguageEn ? "Display reason for player exit (true - yes/false - no)" : "Отображать причину выхода игрока (true - да/false - нет)")]
-                    public Boolean DisconnectedReason;
-
-                    [JsonProperty(LanguageEn ? "Random player entry notifications({0} - player's nickname, {1} - country (if country display is enabled)" : "Случайные уведомления о входе игрока({0} - ник игрока, {1} - страна(если включено отображение страны)")]
-                    public LanguageController RandomConnectionAlert = new LanguageController();
-                    [JsonProperty(LanguageEn ? "Random notifications about the exit of the player ({0} - player's nickname, {1} - the reason for the exit (if the reason is enabled)" : "Случайные уведомления о выходе игрока({0} - ник игрока, {1} - причина выхода(если включена причина)")]
-                    public LanguageController RandomDisconnectedAlert = new LanguageController();
-                }
-                internal class AdminSession
-                {
-                    [JsonProperty(LanguageEn ? "Notify admin on the server in the chat (true - yes/false - no)" : "Уведомлять о входе админа на сервер в чат (true - да/false - нет)")]
-                    public Boolean ConnectedAlertAdmin;
-                    [JsonProperty(LanguageEn ? "Notify about admin leaving the server in chat (true - yes/false - no)" : "Уведомлять о выходе админа на сервер в чат (true - да/false - нет)")]
-                    public Boolean DisconnectedAlertAdmin;
-                }
-                internal class PersonalAlert
-                {
-                    [JsonProperty(LanguageEn ? "Enable random message to the player who has logged in (true - yes/false - no)" : "Включить случайное сообщение зашедшему игроку (true - да/false - нет)")]
-                    public Boolean UseWelcomeMessage;
-                    [JsonProperty(LanguageEn ? "List of messages to the player when entering" : "Список сообщений игроку при входе")]
-                    public LanguageController WelcomeMessage = new LanguageController();
-                }
-            }
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            public class LanguageController
-            {
-                [JsonProperty(LanguageEn ? "Setting up Multilingual Messages [Language Code] = Translation Variations" : "Настройка мультиязычных сообщений [КодЯзыка] = ВариацииПеревода")]
-                public Dictionary<String, List<String>> LanguageMessages = new Dictionary<String, List<String>>();
-            }
-
-            
-                        [JsonProperty(LanguageEn ? "Settings Rust+" : "Настройка Rust+")]
-            public RustPlus RustPlusSettings;
-            internal class RustPlus
-            {
-                [JsonProperty(LanguageEn ? "Use Rust+" : "Использовать Rust+")]
-                public Boolean UseRustPlus;
-                [JsonProperty(LanguageEn ? "Title for notification Rust+" : "Название для уведомления Rust+")]
-                public String DisplayNameAlert;
-            }
-            
-                        [JsonProperty(LanguageEn ? "Configuring support plugins" : "Настройка плагинов поддержки")]
-            public ReferenceSettings ReferenceSetting = new ReferenceSettings();
-            internal class ReferenceSettings
-            {
-                [JsonProperty(LanguageEn ? "Settings XLevels" : "Настройка XLevels")]
-                public XLevels XLevelsSettings = new XLevels();
-                [JsonProperty(LanguageEn ? "Settings IQFakeActive" : "Настройка IQFakeActive")]
-                public IQFakeActive IQFakeActiveSettings = new IQFakeActive();
-                [JsonProperty(LanguageEn ? "Settings IQRankSystem" : "Настройка IQRankSystem")]
-                public IQRankSystem IQRankSystems = new IQRankSystem();
-                [JsonProperty(LanguageEn ? "Settings Clans" : "Настройка Clans")]
-                public Clans ClansSettings = new Clans();
-                [JsonProperty(LanguageEn ? "Settings TranslationAPI" : "Настройка TranslationAPI")]
-                public TranslataionApi translationApiSettings = new TranslataionApi();    
-                [JsonProperty(LanguageEn ? "Settings SkillTree" : "Настройка SkillTree")]
-                public SkillTree skillTreeSettings = new SkillTree();
-                [JsonProperty(LanguageEn ? "Settings PlayerRanks" : "Настройка PlayerRanks")]
-                public PlayerRanks playerRanksSettings = new PlayerRanks();
-                [JsonProperty(LanguageEn ? "Settings XPrison" : "Настройка XPrison")]
-                public XPrison xPrisonSettings = new XPrison();
-                internal class TranslataionApi
-                {
-                    [JsonProperty(LanguageEn ? "To use automatic message translation using the TranslationAPI" : "Использовать автоматический перевод сообщений с помощью TranslataionAPI")]
-                    public Boolean useTranslationApi;
-                    [JsonProperty(LanguageEn ? "Translate team chat" : "Переводить командный чат")]
-                    public Boolean translateTeamChat;
-                    [JsonProperty(LanguageEn ? "Translate chat in private messages." : "Переводить чат в личных сообщениях")] 
-                    public Boolean translatePmChat;
-                    [JsonProperty(LanguageEn ? "The code for the preferred language (leave it empty, and then the translation will be done in each player's language)" : "Код приоритетного языка (оставьте пустым и тогда для каждого игрока будет переводиться на его языке клиента)")]
-                    public String codeLanguagePrimary;
-                }
-                internal class Clans
-                {
-                    [JsonProperty(LanguageEn ? "Display a clan tag in the chat (if Clans are installed)" : "Отображать в чате клановый тэг (если установлены Clans)")]
-                    public Boolean UseClanTag;
-                    [JsonProperty(LanguageEn ? "The color of the additional tag" : "Цвет дополнительного тэга")]
-                    public String colorTag;
-                }
-                internal class IQRankSystem
-                {
-                    [JsonProperty(LanguageEn ? "Rank display format in chat ( {0} is the user's rank, do not delete this value)" : "Формат отображения ранга в чате ( {0} - это ранг юзера, не удаляйте это значение)")]
-                    public String FormatRank = "[{0}]";
-                    [JsonProperty(LanguageEn ? "Time display format with IQRank System in chat ( {0} is the user's time, do not delete this value)" : "Формат отображения времени с IQRankSystem в чате ( {0} - это время юзера, не удаляйте это значение)")]
-                    public String FormatRankTime = "[{0}]";
-                    [JsonProperty(LanguageEn ? "Use support IQRankSystem" : "Использовать поддержку рангов")]
-                    public Boolean UseRankSystem;
-                    [JsonProperty(LanguageEn ? "Show players their played time next to their rank" : "Отображать игрокам их отыгранное время рядом с рангом")]
-                    public Boolean UseTimeStandart;
-                }
-                internal class IQFakeActive
-                {
-                    [JsonProperty(LanguageEn ? "Use support IQFakeActive" : "Использовать поддержку IQFakeActive")]
-                    public Boolean UseIQFakeActive;
-                }
-                internal class XLevels
-                {
-                    [JsonProperty(LanguageEn ? "Use support XLevels" : "Использовать поддержку XLevels")]
-                    public Boolean UseXLevels;
-                    [JsonProperty(LanguageEn ? "Use full prefix with level from XLevel (true) otherwise only level (false)" : "Использовать полный префикс с уровнем из XLevel (true) иначе только уровень (false)")]
-                    public Boolean UseFullXLevels;
-                    [JsonProperty(LanguageEn ? "The color of the additional tag" : "Цвет дополнительного тэга")]
-                    public String colorTag;
-                }
-                
-                internal class XPrison
-                {
-                    [JsonProperty(LanguageEn ? "Use support XPrison" : "Использовать поддержку XPrison")]
-                    public Boolean UseXPrison;
-                    [JsonProperty(LanguageEn ? "The color of the additional tag" : "Цвет дополнительного тэга")]
-                    public String colorTag;
-                }
-                
-                internal class SkillTree
-                {
-                    [JsonProperty(LanguageEn ? "Use support SkillTree" : "Использовать поддержку SkillTree")]
-                    public Boolean UseSkillTree;
-                    [JsonProperty(LanguageEn ? "Use full XP + Level information output (true), use only Level (false)" : "Использовать полный вывод информации XP + Level (true), использовать только Level (false)")]
-                    public Boolean UseFullSkillTree;
-                    [JsonProperty(LanguageEn ? "Use prestige" : "Использовать престиж")]
-                    public Boolean UsePrestigeSkillTree;
-                    [JsonProperty(LanguageEn ? "The color of the additional tag" : "Цвет дополнительного тэга")]
-                    public String colorTag;
-                }
-                
-                internal class PlayerRanks
-                {
-                    [JsonProperty(LanguageEn ? "Use support PlayerRanks" : "Использовать поддержку PlayerRanks")]
-                    public Boolean UsePlayerRanks;
-                    [JsonProperty(LanguageEn ? "The color of the additional tag" : "Цвет дополнительного тэга")]
-                    public String colorTag;
-                }
-            }
-            
-            
-            [JsonProperty(LanguageEn ? "Setting up an answering machine" : "Настройка автоответчика")]
-            public AnswerMessage AnswerMessages = new AnswerMessage();
-
-            internal class AnswerMessage
-            {
-                [JsonProperty(LanguageEn ? "Enable auto-reply? (true - yes/false - no)" : "Включить автоответчик?(true - да/false - нет)")]
-                public bool UseAnswer;
-                [JsonProperty(LanguageEn ? "Customize Messages [Keyword] = Reply" : "Настройка сообщений [Ключевое слово] = Ответ")]
-                public Dictionary<String, LanguageController> AnswerMessageList = new Dictionary<String, LanguageController>();
-            }
-
-            
-            
-            [JsonProperty(LanguageEn ? "Disable additional chat duplication in RCON" : "Отключить дополнительное дублированиеи чата в RCON")]
-            public Boolean disableRconBroadcast;
-            [JsonProperty(LanguageEn ? "Additional setting" : "Дополнительная настройка")]
-            public OtherSettings OtherSetting;
-
-            internal class OtherSettings
-            {
-                [JsonProperty("SteamApiKey (https://steamcommunity.com/dev/apikey)")]
-                public String renameSteamApiKey;
-                [JsonProperty(LanguageEn ? "Enable the /online command (true - yes / false - no)" : "Включить команду /online (true - да/ false - нет)")]
-                public Boolean UseCommandOnline;
-                [JsonProperty(LanguageEn ? "Use shortened format /online (will only display quantity)" : "Использовать сокращенный формат /online (будет отображать только количество)")]
-                public Boolean UseCommandShortOnline;
-                [JsonProperty(LanguageEn ? "Compact logging of messages" : "Компактное логирование сообщений")]
-                public CompactLoggetChat CompactLogsChat = new CompactLoggetChat();
-                [JsonProperty(LanguageEn ? "Setting up message logging" : "Настройка логирования сообщений")]
-                public LoggedChat LogsChat = new LoggedChat();
-                [JsonProperty(LanguageEn ? "Setting up logging of personal messages of players" : "Настройка логирования личных сообщений игроков")]
-                public General LogsPMChat = new General();
-                [JsonProperty(LanguageEn ? "Setting up chat/voice lock/unlock logging" : "Настройка логирования блокировок/разблокировок чата/голоса")]
-                public General LogsMuted = new General();
-                [JsonProperty(LanguageEn ? "Setting up logging of chat commands from players" : "Настройка логирования чат-команд от игроков")]
-                public General LogsChatCommands = new General();
-
-                internal class CompactLoggetChat
-                {
-                    [JsonProperty(LanguageEn ? "Display Steam64ID in the log (true - yes/false - no)" : "Отображать в логе Steam64ID (true - да/false - нет)")]
-                    public Boolean ShowSteamID;
-                    [JsonProperty(LanguageEn ? "Setting up compact message logging" : "Настройка компактного логирования сообщений")]
-                    public LoggedChat LogsCompactChat = new LoggedChat();
-                }
-                internal class LoggedChat
-                {
-                    [JsonProperty(LanguageEn ? "Setting up general chat logging" : "Настройка логирования общего чата")]
-                    public General GlobalChatSettings = new General();
-                    [JsonProperty(LanguageEn ? "Setting up team chat logging" : "Настройка логирования тим чата")]
-                    public General TeamChatSettings = new General();
-                }
-                internal class General
-                {
-                    [JsonProperty(LanguageEn ? "Enable logging (true - yes/false - no)" : "Включить логирование (true - да/false - нет)")]
-                    public Boolean UseLogged = false;
-                    [JsonProperty(LanguageEn ? "Webhooks channel for logging" : "Webhooks канала для логирования")]
-                    public String Webhooks = "";
-                }
-            }
-            
-            public static Configuration GetNewConfiguration()
-            {
-                return new Configuration
-                {
-                                        ControllerParameter = new ControllerParameters
-                    {
-                        VisualParametres = new ControllerParameters.VisualSettingParametres
-                        {
-                            PrefixType = SelectedParametres.DropList,
-                            ChatColorType = SelectedParametres.DropList,
-                            NickColorType = SelectedParametres.Slider,
-                            IQRankSystemType = SelectedParametres.Slider,
-                        },
-                        Prefixes = new ControllerParameters.PrefixSetting
-                        {
-                            TurnMultiPrefixes = false,
-                            MaximumMultiPrefixCount = 5,
-                            Prefixes = new List<ControllerParameters.AdvancedFuncion>
-                              {
-                                  new ControllerParameters.AdvancedFuncion
-                                  {
-                                      Argument = LanguageEn ? "<color=#CC99FF>[PLAYER]</color>" : "<color=#CC99FF>[ИГРОК]</color>",
-                                      Permissions = "iqchat.default",
-                                      IsBlockSelected = false,
-                                  },
-                                  new ControllerParameters.AdvancedFuncion
-                                  {
-                                      Argument = "<color=#ffff99>[VIP]</color>",
-                                      Permissions = "iqchat.admin",
-                                      IsBlockSelected = false,
-                                  },
-                                  new ControllerParameters.AdvancedFuncion
-                                  {
-                                      Argument = LanguageEn ? "<color=#ff9999>[ADMIN]</color>" : "<color=#ff9999>[АДМИН]</color>",
-                                      Permissions = "iqchat.admin",
-                                      IsBlockSelected = false,
-                                  },
-                            },
-                        },
-                        MessageColorList = new List<ControllerParameters.AdvancedFuncion>
-                        {
-                               new ControllerParameters.AdvancedFuncion
-                               {
-                                    Argument = "#CC99FF",
-                                    Permissions = "iqchat.default",
-                                    IsBlockSelected = false,
-                               },
-                               new ControllerParameters.AdvancedFuncion
-                               {
-                                    Argument = "#ffff99",
-                                    Permissions = "iqchat.admin",
-                                    IsBlockSelected = false,
-                               },
-                               new ControllerParameters.AdvancedFuncion
-                               {
-                                    Argument = "#ff9999",
-                                    Permissions = "iqchat.admin",
-                                    IsBlockSelected = false,
-                               },
-                        },
-                        NickColorList = new List<ControllerParameters.AdvancedFuncion>
-                        {
-                               new ControllerParameters.AdvancedFuncion
-                               {
-                                    Argument = "#CC99FF",
-                                    Permissions = "iqchat.default",
-                                    IsBlockSelected = false,
-                               },
-                               new ControllerParameters.AdvancedFuncion
-                               {
-                                    Argument = "#ffff99",
-                                    Permissions = "iqchat.admin",
-                                    IsBlockSelected = false,
-                               },
-                               new ControllerParameters.AdvancedFuncion
-                               {
-                                    Argument = "#ff9999",
-                                    Permissions = "iqchat.admin",
-                                    IsBlockSelected = false,
-                               },
-                        },
-                    },
-                    
-                    
-                    ControllerConnect = new ControllerConnection
-                    {
-                        SetupDefaults = new ControllerConnection.SetupDefault
-                        {
-                            PrefixDefault = LanguageEn ? "<color=#CC99FF>[PLAYER]</color>" : "<color=#CC99FF>[ИГРОК]</color>",
-                            MessageDefault = "#eee",
-                            NickDefault = "#0099FF",
-                        },
-                        Turneds = new ControllerConnection.Turned
-                        {
-                            TurnAutoDropColorChat = true,
-                            TurnAutoDropColorNick = true,
-                            TurnAutoDropPrefix = true,
-                            TurnAutoSetupColorChat = true,
-                            TurnAutoSetupColorNick = true,
-                            TurnAutoSetupPrefix = true,
-                        }
-                    },
-
-                    
-                    
-                    ControllerMutes = new ControllerMute
-                    {
-                        mutedPM = false,
-                        LoggedMute = new ControllerMute.LoggedFuncion
-                        {
-                            UseHistoryMessage = false,
-                            CountHistoryMessage = 10,
-                        },
-                        AutoMuteSettings = new ControllerMute.AutoMute
-                        {
-                            UseAutoMute = true,
-                            AutoMuted = new ControllerMute.Muted
-                            {
-                                Reason = LanguageEn ? "Automatic chat blocking" : "Автоматическая блокировка чата",
-                                SecondMute = 300,
-                            }
-                        },
-                        MuteChatReasons = new List<ControllerMute.Muted>
-                        {
-                            new ControllerMute.Muted
-                            {
-                                Reason = LanguageEn ? "Aggressive behavior" : "Агрессивное поведение",
-                                SecondMute = 100,
-                            },
-                            new ControllerMute.Muted
-                            {
-                                Reason = LanguageEn ? "Insults" : "Оскорбления",
-                                SecondMute = 300,
-                            },
-                            new ControllerMute.Muted
-                            {
-                                Reason = LanguageEn ? "Insult (repeated violation)" : "Оскорбление (повторное нарушение)",
-                                SecondMute = 1000,
-                            },
-                            new ControllerMute.Muted
-                            {
-                                Reason = LanguageEn ? "Advertising" : "Реклама",
-                                SecondMute = 5000,
-                            },
-                            new ControllerMute.Muted
-                            {
-                                Reason = LanguageEn ? "Humiliation" : "Унижение",
-                                SecondMute = 300,
-                            },
-                            new ControllerMute.Muted
-                            {
-                                Reason = LanguageEn ? "Spam" : "Спам",
-                                SecondMute = 60,
-                            },
-                        },
-                        MuteVoiceReasons = new List<ControllerMute.Muted>
-                        {
-                            new ControllerMute.Muted
-                            {
-                                Reason = LanguageEn ? "Aggressive behavior" : "Агрессивное поведение",
-                                SecondMute = 100,
-                            },
-                            new ControllerMute.Muted
-                            {
-                                Reason = LanguageEn ? "Insults" : "Оскорбления",
-                                SecondMute = 300,
-                            },
-                            new ControllerMute.Muted
-                            {
-                                Reason = LanguageEn ? "Disruption of the event by shouting" : "Срыв мероприятия криками",
-                                SecondMute = 300,
-                            },
-                        }
-                    },
-
-                    
-                    
-                    ControllerMessages = new ControllerMessage
-                    {
-                        Formatting = new ControllerMessage.FormattingMessage
-                        {
-                            UseBadWords = true,
-                            BadWords = LanguageEn ? new Dictionary<String, Boolean>() { ["fucking"] = false, ["sucking"] = false, ["fuckyou"] = false, ["fuck"] = true } : new Dictionary<String, Boolean>() { ["бля"] = false, ["сука"] = false, ["говно"] = false, ["нахуй"] = true },
-                            FormatMessage = true, 
-                            ReplaceBadWord = "***",
-                            ControllerNickname = new ControllerMessage.FormattingMessage.NickController
-                            {
-                                BadNicks = LanguageEn ? new Dictionary<String, Boolean>() { ["Admin"] = true, ["Owner"] = true, ["Moderator"] = true, ["Helper"] = true } : new Dictionary<String, Boolean>() { ["Админ"] = true, ["Модератор"] = true, ["Модер"] = true, ["Хелпер"] = true },
-                                AllowedLinkNick = new List<String> { "mysite.com" },
-                                ReplaceBadNick = "",
-                                UseNickController = true,
-                            },
-                        },
-                        TurnedFunc = new ControllerMessage.TurnedFuncional
-                        {
-                            HideAdminGave = true,
-                            IgnoreUsePM = true,
-                            MuteTeamChat = true,
-                            AntiNoobSetting = new ControllerMessage.TurnedFuncional.AntiNoob
-                            {
-                                AntiNoobChat = new ControllerMessage.TurnedFuncional.AntiNoob.Settings
-                                {
-                                    AntiNoobActivate = false,
-                                    TimeBlocked = 1200,
-                                },
-                                AntiNoobPM = new ControllerMessage.TurnedFuncional.AntiNoob.Settings
-                                {
-                                    AntiNoobActivate = false,
-                                    TimeBlocked = 1200,
-                                },
-                            },
-                            AntiSpamSetting = new ControllerMessage.TurnedFuncional.AntiSpam
-                            {
-                                AntiSpamActivate = true,
-                                FloodTime = 10,
-                                AntiSpamDuplesSetting = new ControllerMessage.TurnedFuncional.AntiSpam.AntiSpamDuples
-                                {
-                                    AntiSpamDuplesActivate = true,
-                                    MuteSetting = new ControllerMute.Muted
-                                    {
-                                        Reason = LanguageEn ? "Duplicate messages (SPAM)" : "Повторяющиеся сообщения (СПАМ)",
-                                        SecondMute = 300,
-                                    },
-                                    TryDuples = 3,
-                                }
-                            },
-                            PMSetting = new ControllerMessage.TurnedFuncional.PM
-                            {
-                                PMActivate = true,
-                                SoundPM = "assets/bundled/prefabs/fx/notice/stack.world.fx.prefab",
-                            },
-                        },
-                        GeneralSetting = new ControllerMessage.GeneralSettings
-                        {
-                            alertArgumentsInfoRemove = true,
-                            alertArgumentsInfoSetup = true,
-                            BroadcastFormat = new ControllerMessage.GeneralSettings.BroadcastSettings
-                            {
-                                BroadcastColor = "#efedee",
-                                BroadcastTitle = LanguageEn ? "<color=#68cacd><b>[Alert]</b></color>" : "<color=#68cacd><b>[ОПОВЕЩЕНИЕ]</b></color>",
-                                Steam64IDAvatar = "0",
-                            },
-                            AlertFormat = new ControllerMessage.GeneralSettings.AlertSettings
-                            {
-                                AlertPlayerColor = "#efedee",
-                                SoundAlertPlayer = "assets/bundled/prefabs/fx/notice/item.select.fx.prefab",
-                            },
-                            OtherSetting = new ControllerMessage.GeneralSettings.OtherSettings
-                            {
-                                TimeDeleteAlertUI = 5,
-                                SizePrefix = 14,
-                                SizeMessage = 14,
-                                SizeNick = 14,
-                                sizeMessagePrivilages = new Dictionary<String, Int32>()
-                                {
-                                    ["iqchat.bigBoy"] = 16,
-                                },
-                                sizeNickPrivilages = new Dictionary<String, Int32>()
-                                {
-                                    ["iqchat.bigBoy"] = 16,
-                                }
-                            }
-                        },
-                    },
-
-                    
-                    
-                    ControllerAlertSetting = new ControllerAlert
-                    {
-                        AlertSetting = new ControllerAlert.Alert
-                        {
-                            AlertMessage = true,
-                            AlertMessageType = false,
-                            MessageList = new LanguageController()
-                            {
-                                LanguageMessages = new Dictionary<String, List<String>>()
-                                {
-                                    ["en"] = new List<String>()
-                                    {
-                                        "Automatic message #1 (Edit in configuration)",
-                                        "Automatic message #2 (Edit in configuration)",
-                                        "Automatic message #3 (Edit in configuration)",
-                                        "Automatic message #4 (Edit in configuration)",
-                                        "Automatic message #5 (Edit in configuration)",
-                                        "Automatic message #6 (Edit in configuration)",
-                                    },
-                                    ["ru"] = new List<String>()
-                                    {
-                                        "Автоматическое сообщение #1 (Редактировать в конфигурации)",
-                                        "Автоматическое сообщение #2 (Редактировать в конфигурации)",
-                                        "Автоматическое сообщение #3 (Редактировать в конфигурации)",
-                                        "Автоматическое сообщение #4 (Редактировать в конфигурации)",
-                                        "Автоматическое сообщение #5 (Редактировать в конфигурации)",
-                                        "Автоматическое сообщение #6 (Редактировать в конфигурации)",
-                                    }
-                                },
-                            },
-                            MessageListTimer = 60,
-                        },
-                        AdminSessionSetting = new ControllerAlert.AdminSession
-                        {
-                            ConnectedAlertAdmin = false,
-                            DisconnectedAlertAdmin = false,
-                        },
-                        PlayerSessionSetting = new ControllerAlert.PlayerSession
-                        {
-                            ConnectedAlert = true,
-                            ConnectedAvatarUse = true,
-                            ConnectedWorld = true,
-                            ConnectionAlertRandom = false,
-
-                            DisconnectedAlert = true,
-                            DisconnectedAlertRandom = false,
-                            DisconnectedReason = true,
-
-                            RandomConnectionAlert = new LanguageController
-                            {
-                                LanguageMessages = new Dictionary<String, List<String>>()
-                                {
-                                    ["en"] = new List<String>()
-                                    {
-                                        "{0} flew in from {1}",
-                                        "{0} flew into the server from{1}",
-                                        "{0} jumped on a server"
-                                    },
-                                    ["ru"] = new List<String>()
-                                    {
-                                        "{0} влетел как дурачок из {1}",
-                                        "{0} залетел на сервер из {1}, соболезнуем",
-                                        "{0} прыгнул на сервачок"
-                                    }
-                                }
-                            },
-                            RandomDisconnectedAlert = new LanguageController()
-                            {
-                                LanguageMessages = new Dictionary<String, List<String>>()
-                                {
-                                    ["en"] = new List<String>()
-                                    {
-                                        "{0} gone to another world",
-                                        "{0} left the server with a reason {1}",
-                                        "{0} went to another server"
-                                    },
-                                    ["ru"] = new List<String>()
-                                    {
-                                        "{0} ушел в мир иной",
-                                        "{0} вылетел с сервера с причиной {1}",
-                                        "{0} пошел на другой сервачок"
-                                    }
-                                }
-                            },
-                        },
-                        PersonalAlertSetting = new ControllerAlert.PersonalAlert
-                        {
-                            UseWelcomeMessage = true,
-                            WelcomeMessage = new LanguageController
-                            {
-                                LanguageMessages = new Dictionary<String, List<String>>()
-                                {
-                                    ["en"] = new List<String>()
-                                    {
-                                        "Welcome to the server SUPERSERVER\nWe are glad that you chose us!",
-                                        "Welcome back to the server!\nWe wish you good luck",
-                                        "Welcome to the server\nWe have the best plugins",
-                                    },
-                                    ["ru"] = new List<String>()
-                                    {
-                                        "Добро пожаловать на сервер SUPERSERVER\nРады,что выбрал именно нас!",
-                                        "С возвращением на сервер!\nЖелаем тебе удачи",
-                                        "Добро пожаловать на сервер\nУ нас самые лучшие плагины",
-                                    }
-                                }
-                            },
-                        }
-                    },
-
-                    
-                    
-                    ReferenceSetting = new ReferenceSettings
-                    {
-                        playerRanksSettings = new ReferenceSettings.PlayerRanks()
-                        {
-                            UsePlayerRanks = false,
-                            colorTag = "#FF0000, #FF3300, #FF6600, #FF9900, #FFCC00, #FFFF00, #CCFF00, #99FF00, #66FF00, #33FF00",
-                        },
-                        skillTreeSettings = new ReferenceSettings.SkillTree
-                        {
-                            UseSkillTree = false,
-                            UseFullSkillTree = false,
-                            UsePrestigeSkillTree = false,
-                            colorTag = "#FF0000, #FF3300, #FF6600, #FF9900, #FFCC00, #FFFF00, #CCFF00, #99FF00, #66FF00, #33FF00",
-                        },
-                        translationApiSettings = new ReferenceSettings.TranslataionApi()
-                        {
-                            useTranslationApi = false,
-                            translateTeamChat = false,
-                            translatePmChat = true,
-                            codeLanguagePrimary = "",
-                        },
-                        IQFakeActiveSettings = new ReferenceSettings.IQFakeActive
-                        {
-                            UseIQFakeActive = true,
-                        },
-                        IQRankSystems = new ReferenceSettings.IQRankSystem
-                        {
-                            FormatRank = "[{0}]",
-                            FormatRankTime = "[{0}]",
-                            UseRankSystem = false,
-                            UseTimeStandart = true
-                        },
-                        xPrisonSettings = new ReferenceSettings.XPrison()
-                        {
-                            UseXPrison = false,
-                            colorTag = "#FF0000, #FF3300, #FF6600, #FF9900, #FFCC00, #FFFF00, #CCFF00, #99FF00, #66FF00, #33FF00",
-                        },
-                        XLevelsSettings = new ReferenceSettings.XLevels()
-                        {
-                            UseXLevels = false,
-                            UseFullXLevels = false,
-                            colorTag = "#FF0000, #FF3300, #FF6600, #FF9900, #FFCC00, #FFFF00, #CCFF00, #99FF00, #66FF00, #33FF00",
-                        },
-                        ClansSettings = new ReferenceSettings.Clans()
-                        {
-                            UseClanTag = false,
-                            colorTag = "#FF0000, #FF3300, #FF6600, #FF9900, #FFCC00, #FFFF00, #CCFF00, #99FF00, #66FF00, #33FF00",
-                        }
-                    },
-
-                    
-                    
-                    RustPlusSettings = new RustPlus
-                    {
-                        UseRustPlus = true,
-                        DisplayNameAlert = LanguageEn ? "SUPER SERVER" : "СУПЕР СЕРВЕР",
-                    },
-
-                    
-                    
-                    AnswerMessages = new AnswerMessage
-                    {
-                        UseAnswer = true,
-                        AnswerMessageList = new Dictionary<String, LanguageController>()
-                        {
-                            ["wipe"] = new LanguageController()
-                            {
-                                LanguageMessages = new Dictionary<String, List<String>>()
-                                {
-                                    ["en"] = new List<String>()
-                                    {
-                                        "Wipe will be 27.06"
-                                    },
-                                    ["ru"] = new List<String>()
-                                    {
-                                        "Вайп будет 27.06"
-                                    }
-                                }
-                            },
-                            ["читер"] = new LanguageController()
-                            {
-                                LanguageMessages = new Dictionary<String, List<String>>()
-                                {
-                                    ["en"] = new List<String>()
-                                    {
-                                        "Found a cheater? Write /report and send a complaint"
-                                    },
-                                    ["ru"] = new List<String>()
-                                    {
-                                        "Нашли читера?Напиши /report и отправь жалобу"
-                                    }
-                                }
-                            }
-                        },
-                    },
-
-                    
-                                        disableRconBroadcast = true,
-                    OtherSetting = new OtherSettings
-                    {
-                        renameSteamApiKey = "",
-                        UseCommandOnline = false,
-                        UseCommandShortOnline = true,
-                        CompactLogsChat = new OtherSettings.CompactLoggetChat
-                        {
-                            ShowSteamID = false,
-                            LogsCompactChat = new OtherSettings.LoggedChat
-                            {
-                                GlobalChatSettings = new OtherSettings.General
-                                {
-                                    UseLogged = false,
-                                    Webhooks = "",
-                                },
-                                TeamChatSettings = new OtherSettings.General
-                                {
-                                    UseLogged = false,
-                                    Webhooks = "",
-                                }
-                            }
-                        },
-                        LogsChat = new OtherSettings.LoggedChat
-                        {
-                            GlobalChatSettings = new OtherSettings.General
-                            {
-                                UseLogged = false,
-                                Webhooks = "",
-                            },
-                            TeamChatSettings = new OtherSettings.General
-                            {
-                                UseLogged = false,
-                                Webhooks = "",
-                            }
-                        },
-                        LogsChatCommands = new OtherSettings.General
-                        {
-                            UseLogged = false,
-                            Webhooks = "",
-                        },
-                        LogsPMChat = new OtherSettings.General
-                        {
-                            UseLogged = false,
-                            Webhooks = "",
-                        },
-                        LogsMuted = new OtherSettings.General
-                        {
-                            UseLogged = false,
-                            Webhooks = "",
-                        },
-                    },
-
-                                    };
-            }
-        }
-        public Object IsGradientColorValue(String value)
-        {
-            if (String.IsNullOrEmpty(value)) return value?.Trim();
-            if (!value.Contains(",")) return value.Trim();
-            List<String> colors = new(value.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries));
-            for (Int32 i = 0; i < colors.Count; i++)
-                colors[i] = colors[i].Trim();
-    
-            return colors;
-        }
-        private void DrawUI_IQChat_Update_MuteVoice_All(BasePlayer player)
-        {
-            if (!permission.UserHasPermission(player.UserIDString, PermissionMutedAdmin)) return;
-
-            String InterfaceAdministratorVoice = InterfaceBuilder.GetInterface("UI_Chat_Administation_AllVoce");
-            if (InterfaceAdministratorVoice == null) return;
-
-            InterfaceAdministratorVoice = InterfaceAdministratorVoice.Replace("%TEXT_MUTE_ALLVOICE%", GetLang(!GeneralInfo.TurnMuteAllVoice ? "IQCHAT_BUTTON_MODERATION_MUTE_ALL_VOICE" : "IQCHAT_BUTTON_MODERATION_UNMUTE_ALL_VOICE", player.UserIDString));
-            InterfaceAdministratorVoice = InterfaceAdministratorVoice.Replace("%COMMAND_MUTE_ALLVOICE%", $"newui.cmd action.mute.ignore mute.controller {SelectedAction.Mute} mute.all.voice");
-
-            CuiHelper.DestroyUi(player, "ModeratorMuteAllVoice");
-            CuiHelper.AddUi(player, InterfaceAdministratorVoice);
-        }
-        
-        [ConsoleCommand("mutevoice")]
-        void MuteCustomVoiceAdmin(ConsoleSystem.Arg arg)
-        {
-            if (arg.Player() != null)
-                if (!permission.UserHasPermission(arg.Player().UserIDString, PermissionMute)) return;
-            if (arg == null || arg.Args == null || arg.Args.Length != 3 || arg.Args.Length > 3)
-            {
-                PrintWarning(LanguageEn ? "Invalid syntax, use : mutevoice Steam64ID/Nick Reason Time(seconds)" : "Неверный синтаксис,используйте : mutevoice Steam64ID/Ник Причина Время(секунды)");
-                return;
-            }
-            string NameOrID = arg.Args[0];
-            string Reason = arg.Args[1];
-            Int32 TimeMute = 0;
-            if (!Int32.TryParse(arg.Args[2], out TimeMute))
-            {
-                PrintWarning(LanguageEn ? "Enter time in numbers!" : "Введите время цифрами!");
-                return;
-            }
-            
-            BasePlayer target = GetPlayerNickOrID(NameOrID);
-            if (target == null)
-            {
-                UInt64 Steam64ID = 0;
-                if (UInt64.TryParse(NameOrID, out Steam64ID))
-                {
-                    if (UserInformation.ContainsKey(Steam64ID))
-                    {
-                        User Info = UserInformation[Steam64ID];
-                        if (Info == null) return;
-                        if (Info.MuteInfo.IsMute(MuteType.Voice))
-                        {
-                            PrintWarning(LanguageEn ? "The player already has a voice lock" : "Игрок уже имеет блокировку голосового чата");
-                            return;
-                        }
-
-                        Info.MuteInfo.SetMute(MuteType.Voice, TimeMute);
-                        PrintWarning(LanguageEn ? "Voice blocking issued to offline player" : "Блокировка голосового чата выдана offline-игроку");
-                        return;
-                    }
-                    else
-                    {
-                        PrintWarning(LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                        return;
-                    }
-                }
-                else
-                {
-                    PrintWarning(LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                    return;
-                }
-            }
-
-            MutePlayer(target, MuteType.Voice, 0, arg.Player(), Reason, TimeMute, false, true);
-            Puts(LanguageEn ? "Successfully" : "Успешно");
-        }
-
-        [ConsoleCommand("alertui")]
-        private void AlertUIConsoleCommand(ConsoleSystem.Arg args)
-        {
-            BasePlayer Sender = args.Player();
-            if (Sender != null)
-                if (!permission.UserHasPermission(Sender.UserIDString, PermissionAlert)) return;
-            AlertUI(Sender, args.Args);
-        }
-        private const String PermissionHideOnline = "iqchat.onlinehide";
-        private void DrawUI_IQChat_Mute_And_Ignore_Player(BasePlayer player, SelectedAction Action, IEnumerable<BasePlayer> PlayerList, IEnumerable<FakePlayer> FakePlayerList = null)
-        {
-            User MyInfo = UserInformation[player.userID];
-            if (MyInfo == null) return;
-            Int32 X = 0, Y = 0;
-            String ColorGreen = "0.5803922 1 0.5372549 1";
-            String ColorRed = "0.8962264 0.2578764 0.3087685 1";
-            String Color = String.Empty;
-
-            if (IsReadyIQFakeActive() && FakePlayerList != null)
-            {
-                foreach (FakePlayer playerInList in FakePlayerList)
-                {
-                    String Interface = InterfaceBuilder.GetInterface("UI_Chat_Mute_And_Ignore_Player");
-                    if (Interface == null) return;
-
-                    String DisplayName = playerInList.displayName;
-                    if (!UInt64.TryParse(playerInList.userId, out UInt64 userIdAsUlong)) return;
-                    
-                    if (GeneralInfo.RenameList.ContainsKey(userIdAsUlong))
-                        if (!String.IsNullOrWhiteSpace(GeneralInfo.RenameList[userIdAsUlong].RenameNick))
-                            DisplayName = GeneralInfo.RenameList[userIdAsUlong].RenameNick;
-
-                    Interface = Interface.Replace("%OFFSET_MIN%", $"{-385.795 - (-281.17 * X)} {97.54 - (46.185 * Y)}");
-                    Interface = Interface.Replace("%OFFSET_MAX%", $"{-186.345 - (-281.17 * X)} {132.03 - (46.185 * Y)}");
-                    Interface = Interface.Replace("%DISPLAY_NAME%", $"{DisplayName}");
-                    Interface = Interface.Replace("%COMMAND_ACTION%", $"newui.cmd action.mute.ignore ignore.and.mute.controller {Action} confirm.alert {userIdAsUlong}");
-
-                    switch (Action)
-                    {
-                        case SelectedAction.Mute:
-                            if (playerInList.isMuted || (UserInformation.ContainsKey(userIdAsUlong) && UserInformation[userIdAsUlong] != null && (UserInformation[userIdAsUlong].MuteInfo.IsMute(MuteType.Chat) || UserInformation[userIdAsUlong].MuteInfo.IsMute(MuteType.Voice))))
-                                Color = ColorRed;
-                            else Color = ColorGreen;
-                            break;
-                        case SelectedAction.Ignore:
-                            if (MyInfo.Settings.IsIgnored(userIdAsUlong))
-                                Color = ColorRed;
-                            else Color = ColorGreen;
-                            break;
-                        default:
-                            break;
-                    }
-
-                    Interface = Interface.Replace("%COLOR%", Color);
-		   		 		  						  	   		  		 			  		  		  			 		   			
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                    X++;
-                    if (X == 3)
-                    {
-                        X = 0;
-                        Y++;
-                    }
-
-                    CuiHelper.AddUi(player, Interface);
-                }
-            }
-            else
-            {
-                foreach (var playerInList in PlayerList)
-                {
-                    String Interface = InterfaceBuilder.GetInterface("UI_Chat_Mute_And_Ignore_Player");
-                    if (Interface == null) return;
-                    User Info = UserInformation[playerInList.userID];
-                    if (Info == null) continue;
-
-                    String DisplayName = playerInList.displayName;
-                    if (GeneralInfo.RenameList.ContainsKey(playerInList.userID))
-                        if (!String.IsNullOrWhiteSpace(GeneralInfo.RenameList[playerInList.userID].RenameNick))
-                            DisplayName = GeneralInfo.RenameList[playerInList.userID].RenameNick;
-
-                    Interface = Interface.Replace("%OFFSET_MIN%", $"{-385.795 - (-281.17 * X)} {97.54 - (46.185 * Y)}");
-                    Interface = Interface.Replace("%OFFSET_MAX%", $"{-186.345 - (-281.17 * X)} {132.03 - (46.185 * Y)}");
-                    Interface = Interface.Replace("%DISPLAY_NAME%", $"{DisplayName}");
-                    Interface = Interface.Replace("%COMMAND_ACTION%", $"newui.cmd action.mute.ignore ignore.and.mute.controller {Action} confirm.alert {playerInList.userID}");
-
-                    switch (Action)
-                    {
-                        case SelectedAction.Mute:
-                            if (Info.MuteInfo.IsMute(MuteType.Chat) || Info.MuteInfo.IsMute(MuteType.Voice))
-                                Color = ColorRed;
-                            else Color = ColorGreen;
-                            break;
-                        case SelectedAction.Ignore:
-                            if (MyInfo.Settings.IsIgnored(playerInList.userID))
-                                Color = ColorRed;
-                            else Color = ColorGreen;
-                            break;
-                        default:
-                            break;
-                    }
-
-                    Interface = Interface.Replace("%COLOR%", Color);
-
-
-                    X++;
-                    if (X == 3)
-                    {
-                        X = 0;
-                        Y++;
-                    }
-
-                    CuiHelper.AddUi(player, Interface);
-                }
-            }
-        }
-        private const String PermissionUseCmdMsg = "iqchat.cmsg";
-        
-        
-        void API_SEND_PLAYER(BasePlayer player, String PlayerFormat, String Message, String Avatar, Chat.ChatChannel channel = Chat.ChatChannel.Global)
-        {
-            Configuration.ControllerMessage ControllerMessages = config.ControllerMessages;
-
-            String OutMessage = Message; 
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            if (ControllerMessages.Formatting.FormatMessage)
-                OutMessage = $"{Message.ToLower().Substring(0, 1).ToUpper()}{Message.Remove(0, 1).ToLower()}";
-
-            if (ControllerMessages.Formatting.UseBadWords)
-                foreach (String DetectedMessage in OutMessage.Split(' '))
-                    if (ControllerMessages.Formatting.BadWords.ContainsKey(DetectedMessage.ToLower()))
-                        OutMessage = OutMessage.Replace(DetectedMessage, ControllerMessages.Formatting.ReplaceBadWord);
-            
-            player.SendConsoleCommand("chat.add", channel, ulong.Parse(Avatar), $"{PlayerFormat}: {OutMessage}");
-            player.ConsoleMessage($"{PlayerFormat}: {OutMessage}");
-        }
-
-        private void DrawUI_IQChat_Mute_And_Ignore_Player_Panel(BasePlayer player, SelectedAction Action, Int32 Page = 0, String SearchName = null)
-        {
-            String Interface = InterfaceBuilder.GetInterface("UI_Chat_Mute_And_Ignore_Panel_Content");
-            if (Interface == null) return;
-
-            CuiHelper.DestroyUi(player, "MuteIgnorePanelContent");
-            CuiHelper.AddUi(player, Interface);
-            
-            if (IsReadyIQFakeActive())
-            {
-                List<FakePlayer> filteredPlayers = GetFilteredPlayers(SearchName);
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                DrawUI_IQChat_Mute_And_Ignore_Pages(player, HasMorePages(filteredPlayers, Page), Action, Page);
-                DrawUI_IQChat_Mute_And_Ignore_Player(player, Action, null, GetPageOfPlayers(filteredPlayers, Page));
-            }
-            else
-            {
-                IOrderedEnumerable<BasePlayer> playerList = GetPlayerList(SearchName, Action);
-
-                DrawUI_IQChat_Mute_And_Ignore_Pages(player, HasMorePages(playerList, Page), Action, Page);
-                DrawUI_IQChat_Mute_And_Ignore_Player(player, Action, playerList.Skip(18 * Page).Take(18));
-            }
-        }
-        public Dictionary<BasePlayer, List<String>> LastMessagesChat = new Dictionary<BasePlayer, List<String>>();
-        private String GetMessageInArgs(BasePlayer Sender, String[] arg)
-        {
-            if (arg == null || arg.Length == 0)
-            {
-                if (Sender != null)
-                    ReplySystem(Sender, GetLang("FUNC_MESSAGE_NO_ARG_BROADCAST", Sender.UserIDString));
-                else PrintWarning(GetLang("FUNC_MESSAGE_NO_ARG_BROADCAST"));
-                return null;
-            }
-            String Message = String.Empty;
-            foreach (String msg in arg)
-                Message += " " + msg;
-
-            return Message;
-        }
-
-        void OnUserGroupAdded(string id, string groupName)
-        {
-            String[] PermissionsGroup = permission.GetGroupPermissions(groupName);
-            if (PermissionsGroup == null) return;
-            foreach (String permName in PermissionsGroup)
-                SetupParametres(id, permName);
-        }
-        
-        private void SeparatorChat(Chat.ChatChannel channel, BasePlayer player, String Message)
-        {
-            Configuration.ControllerMessage.TurnedFuncional.AntiNoob.Settings antiNoob = config.ControllerMessages.TurnedFunc.AntiNoobSetting.AntiNoobChat;
-            if (antiNoob.AntiNoobActivate)
-                if (IsNoob(player.userID, antiNoob.TimeBlocked))
-                {
-                    ReplySystem(player, GetLang("IQCHAT_INFO_ANTI_NOOB", player.UserIDString, FormatTime(UserInformationConnection[player.userID].LeftTime(antiNoob.TimeBlocked), player.UserIDString)));
-                    return;
-                }
-
-            Configuration.ControllerMessage ControllerMessage = config.ControllerMessages;
-            User Info = UserInformation[player.userID];
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            if (ControllerMessage.TurnedFunc.AntiSpamSetting.AntiSpamActivate)
-                if (!permission.UserHasPermission(player.UserIDString, PermissionAntiSpam))
-                {
-                    if (!Info.MuteInfo.IsMute(MuteType.Chat))
-                    {
-                        if (!Flooders.ContainsKey(player.userID))
-                            Flooders.Add(player.userID, new FlooderInfo { Time = CurrentTime + ControllerMessage.TurnedFunc.AntiSpamSetting.FloodTime, LastMessage = Message });
-                        else
-                        {
-                            if (Flooders[player.userID].Time > CurrentTime)
-                            {
-                                ReplySystem(player, GetLang("FLOODERS_MESSAGE", player.UserIDString, Convert.ToInt32(Flooders[player.userID].Time - CurrentTime)));
-                                return;
-                            }
-
-                            if (ControllerMessage.TurnedFunc.AntiSpamSetting.AntiSpamDuplesSetting.AntiSpamDuplesActivate)
-                            {
-                                if (Flooders[player.userID].LastMessage == Message)
-                                {
-                                    if (Flooders[player.userID].TryFlood >= ControllerMessage.TurnedFunc.AntiSpamSetting.AntiSpamDuplesSetting.TryDuples)
-                                    {
-                                        MutePlayer(player, MuteType.Chat, 0, null, ControllerMessage.TurnedFunc.AntiSpamSetting.AntiSpamDuplesSetting.MuteSetting.Reason, ControllerMessage.TurnedFunc.AntiSpamSetting.AntiSpamDuplesSetting.MuteSetting.SecondMute);
-                                        Flooders[player.userID].TryFlood = 0;
-                                        return;
-                                    }
-                                    Flooders[player.userID].TryFlood++;
-                                }
-                            }
-                        }
-                        Flooders[player.userID].Time = ControllerMessage.TurnedFunc.AntiSpamSetting.FloodTime + CurrentTime;
-                        Flooders[player.userID].LastMessage = Message;
-                    }
-                }
-
-            GeneralInformation General = GeneralInfo;
-            GeneralInformation.RenameInfo RenameInformation = General.GetInfoRename(player.userID);
-
-            Configuration.ControllerParameters ControllerParameter = config.ControllerParameter;
-            Configuration.ControllerMute ControllerMutes = config.ControllerMutes;
-            Configuration.ControllerMessage.GeneralSettings.OtherSettings OtherController = config.ControllerMessages.GeneralSetting.OtherSetting;
-
-            if (General.TurnMuteAllChat)
-            {
-                ReplySystem(player, GetLang("IQCHAT_FUNCED_NO_SEND_CHAT_MUTED_ALL_CHAT", player.UserIDString));
-                return;
-            }
-
-            if (channel == Chat.ChatChannel.Team && !ControllerMessage.TurnedFunc.MuteTeamChat) { }
-            else if (Info.MuteInfo.IsMute(MuteType.Chat))
-            {
-                ReplySystem(player, GetLang("IQCHAT_FUNCED_NO_SEND_CHAT_MUTED", player.UserIDString, FormatTime(Info.MuteInfo.GetTime(MuteType.Chat), player.UserIDString)));
-                return;
-            }
-
-            String Prefixes = String.Empty;
-            String FormattingMessage = Message;
-            String DisplayName = player.displayName;
-
-            UInt64 UserID = player.userID;
-            if (RenameInformation != null)
-            {
-                DisplayName = RenameInformation.RenameNick;
-                UserID = RenameInformation.RenameID;
-            }
-
-            String ColorNickPlayer = !String.IsNullOrWhiteSpace(Info.Info.CustomColorNick) ? Info.Info.CustomColorNick : String.IsNullOrWhiteSpace(Info.Info.ColorNick) ? player.IsAdmin ? "#a8fc55" : "#54aafe" : Info.Info.ColorNick;
-            
-            Object resultColorNick = IsGradientColorValue(ColorNickPlayer);
-            if (resultColorNick is List<String> gradientColors)
-                DisplayName = ApplyGradientToText(DisplayName, gradientColors);
-            else DisplayName = $"<color={ColorNickPlayer}>{DisplayName}</color>";
-            
-            String ChannelMessage = channel == Chat.ChatChannel.Cards ? "<color=#AA8234>[Cards]</color>" :  channel == Chat.ChatChannel.Clan ? "<color=#a5e664>[Clan]</color>" : "";
-
-            if (ControllerMessage.Formatting.UseBadWords)
-            {
-                Tuple<String, Boolean> GetTuple = BadWordsCleaner(Message, ControllerMessage.Formatting.ReplaceBadWord, ControllerMessage.Formatting.BadWords);
-                FormattingMessage = GetTuple.Item1;
-
-                if (GetTuple.Item2 && channel == Chat.ChatChannel.Global)
-                {
-                    if (permission.UserHasPermission(player.UserIDString, PermissionMute))
-                        Interface.Oxide.CallHook("OnModeratorSendBadWords", player, GetTuple.Item1);
-
-                    Interface.Oxide.CallHook("OnPlayerSendBadWords", player, GetTuple.Item1);
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                    if (ControllerMutes.AutoMuteSettings.UseAutoMute)
-                        MutePlayer(player, MuteType.Chat, 0, null, ControllerMutes.AutoMuteSettings.AutoMuted.Reason, ControllerMutes.AutoMuteSettings.AutoMuted.SecondMute);
-                }
-            }
-
-            Object OnMessageIQChat = Interface.CallHook("OnMessageIQChat", FormattingMessage);
-            if (OnMessageIQChat is String)
-                FormattingMessage = (String)OnMessageIQChat;
-            
-            if (ControllerMessage.Formatting.FormatMessage)
-                FormattingMessage = $"{FormattingMessage.Substring(0, 1).ToUpper()}{FormattingMessage.Remove(0, 1).ToLower()}";
-            
-            if (ControllerParameter.Prefixes.TurnMultiPrefixes)
-            {
-                if (Info.Info.PrefixList != null)
-                    Prefixes = String.Join("", Info.Info.PrefixList.Take(ControllerParameter.Prefixes.MaximumMultiPrefixCount));
-
-            }
-            else Prefixes = Info.Info.Prefix;
-
-            Int32 SizeNick = OtherController.GetSizeNickOrMessage(player, true);
-            Int32 SizeMessage = OtherController.GetSizeNickOrMessage(player, false);
-
-            String FormatMessage = $"<size={SizeMessage}>" + "{0}</size>";
-            
-            // String FormatMessage = String.IsNullOrWhiteSpace(Info.Info.ColorMessage) ? $"<size={SizeMessage}>" + "{0}</size>" :
-            //     $"<color={Info.Info.ColorMessage}><size={SizeMessage}>" + "{0}</size></color>";
-
-            String ResultReference = GetReferenceTags(player); 
-            String SendFormat = !String.IsNullOrWhiteSpace(Prefixes) ? 
-                $"{ChannelMessage} {ResultReference}<size={OtherController.SizePrefix}>{Prefixes}</size> <size={SizeNick}>{DisplayName}</size>" :
-                $"{ChannelMessage} {ResultReference} <size={SizeNick}>{DisplayName}</size>";
-            
-            if (config.RustPlusSettings.UseRustPlus)
-                if (channel == Chat.ChatChannel.Team)
-                {
-                    RelationshipManager.PlayerTeam Team = RelationshipManager.ServerInstance.FindTeam(player.currentTeam);
-                    if (Team == null) return;
-                    Util.BroadcastTeamChat(player.Team, player.userID, player.displayName, FormattingMessage, Info.Info.ColorMessage);
-                }
-
-            if (ControllerMutes.LoggedMute.UseHistoryMessage && config.OtherSetting.LogsMuted.UseLogged)
-                AddHistoryMessage(player, FormattingMessage);
-            
-            ReplyChat(channel, player, FormattingMessage, FormatMessage, SendFormat);
-            AnwserMessage(player, FormattingMessage.ToLower());
-            Puts($"{player.displayName}({player.UserIDString}): {FormattingMessage}");
-            Log(LanguageEn ? $"CHAT MESSAGE : {player}: {ChannelMessage} {FormattingMessage}" : $"СООБЩЕНИЕ В ЧАТ : {player}: {ChannelMessage} {FormattingMessage}");
-            DiscordLoggChat(player, channel, Message);
-            DiscordCompactLoggChat(player, channel, Message);
-
-            if (!config.disableRconBroadcast)
-            {
-                RCon.Broadcast(RCon.LogType.Chat, new Chat.ChatEntry
-                {
-                    Message = $"{player.displayName} : {FormattingMessage}",
-                    UserId = player.UserIDString,
-                    Username = player.displayName,
-                    Channel = channel,
-                    Time = (DateTime.UtcNow.Hour * 3600) + (DateTime.UtcNow.Minute * 60),
-                });
-            }
-        }
-        
-        
-        
-        [ChatCommand("alert")]
-        private void AlertChatCommand(BasePlayer Sender, String cmd, String[] args)
-        {
-            if (!permission.UserHasPermission(Sender.UserIDString, PermissionAlert)) return;
-            Alert(Sender, args, false);
-        }
-        private String SkillTree_GetXP(BasePlayer player)
-        {
-            String[] infoSkills = GetInfoSkillTree(player);
-            if(infoSkills == null) return String.Empty;
-            String xpSkillTree = GetLang("SKILLTREE_SYNTAX_XP", player.UserIDString, infoSkills.Last());
-
-            Object resultColorMessage = IsGradientColorValue(config.ReferenceSetting.skillTreeSettings.colorTag);
-            if (resultColorMessage is List<String> gradientColors)
-                xpSkillTree = ApplyGradientToText(xpSkillTree, gradientColors);
-            else xpSkillTree = $"<color={config.ReferenceSetting.skillTreeSettings.colorTag}>{xpSkillTree}</color>";
-            
-            return xpSkillTree;
-        }
-        private void UserConnecteionData(BasePlayer player)
-        {
-            if (config.ControllerMessages.TurnedFunc.AntiNoobSetting.AntiNoobPM.AntiNoobActivate || config.ControllerMessages.TurnedFunc.AntiNoobSetting.AntiNoobChat.AntiNoobActivate)
-            {
-                if (!UserInformationConnection.ContainsKey(player.userID))
-                    UserInformationConnection.Add(player.userID, new AntiNoob());
-            }
-
-            if (GeneralInfo.RenameList.TryGetValue(player.userID, out GeneralInformation.RenameInfo value))
-            {
-                String nickname = value.RenameNick;
-                RenameUpdate(player, nickname);
-            }
-            
-            Configuration.ControllerConnection ControllerConntect = config.ControllerConnect;
-            Configuration.ControllerParameters ControllerParameter = config.ControllerParameter;
-            if (ControllerConntect == null || ControllerParameter == null) return;
-
-            if (!UserInformation.ContainsKey(player.userID))
-            {
-                User Info = new User();
-                if (ControllerConntect.Turneds.TurnAutoSetupPrefix)
-                {
-                    if (ControllerParameter.Prefixes.TurnMultiPrefixes)
-                        Info.Info.PrefixList.Add(ControllerConntect.SetupDefaults.PrefixDefault ?? String.Empty);
-                    else Info.Info.Prefix = ControllerConntect.SetupDefaults.PrefixDefault ?? String.Empty;
-                }
-                
-                Info.Info.ColorNick = ControllerConntect.SetupDefaults.NickDefault ?? String.Empty;
-                Info.Info.ColorMessage = ControllerConntect.SetupDefaults.MessageDefault ?? String.Empty;
-                
-                // if (ControllerConntect.Turneds.TurnAutoSetupColorNick)
-                //     Info.Info.ColorNick = ControllerConntect.SetupDefaults.NickDefault ?? "#ffffff";
-                // else Info.Info.ColorNick = "#ff514";
-                //
-                // if (ControllerConntect.Turneds.TurnAutoSetupColorChat)
-                //     Info.Info.ColorMessage = ControllerConntect.SetupDefaults.MessageDefault ?? "#ffffff";
-                // else Info.Info.ColorMessage = "#ffffff";
-
-                Info.Info.Rank = String.Empty;
-
-                UserInformation.Add(player.userID, Info);
-            }
-            else
-            {
-                User User = UserInformation[player.userID];
-                User.Info.ColorNick ??= ControllerConntect.SetupDefaults.NickDefault ?? String.Empty;
-                User.Info.ColorMessage ??= ControllerConntect.SetupDefaults.MessageDefault ?? String.Empty;
-            }
-        }
-
-        void OnUserGroupRemoved(string id, string groupName)
-        {
-            String[] PermissionsGroup = permission.GetGroupPermissions(groupName);
-            if (PermissionsGroup == null) return;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            foreach (String permName in PermissionsGroup)
-                RemoveParametres(id, permName);
-        }
-        
-        void ReplyBroadcast(String CustomPrefix = null, String CustomAvatar = null, Boolean AdminAlert = false, Dictionary<String, List<String>> Messages = null, params object[] args)
-        {
-            foreach (BasePlayer p in !AdminAlert ? BasePlayer.activePlayerList.Where(p => UserInformation[p.userID].Settings.TurnBroadcast) : BasePlayer.activePlayerList)
-            {
-                sb.Clear();
-                String templateText = GetMessages(p, Messages);
-                if(String.IsNullOrWhiteSpace(templateText)) continue;
-                ReplySystem(p, sb.AppendFormat(templateText, args).ToString(), CustomPrefix, CustomAvatar);
-            }
-        }
-        private const String PermissionAntiSpam = "iqchat.antispamabuse";
-
-        void OnPlayerDisconnected(BasePlayer player, string reason) => AlertDisconnected(player, reason);
-
-                
-                
-        private String GetPrestigeLevel(UInt64 player)
-        {
-            if (!config.ReferenceSetting.skillTreeSettings.UsePrestigeSkillTree || !SkillTree) return String.Empty;
-            Object prestige = SkillTree.Call("GetPrestigeLevel", player);
-            if(prestige == null) return String.Empty;
-            Int32 levelPrestige = (Int32)prestige;
-            String prestigeResult = GetLang("SKILLTREE_SYNTAX_PRESTIGE_LEVEL", player.ToString(), levelPrestige);
-            
-            Object resultColorMessage = IsGradientColorValue(config.ReferenceSetting.skillTreeSettings.colorTag);
-            if (resultColorMessage is List<String> gradientColors)
-                prestigeResult = ApplyGradientToText(prestigeResult, gradientColors);
-            else prestigeResult = $"<color={config.ReferenceSetting.skillTreeSettings.colorTag}>{prestigeResult}</color>";
-            
-            return prestigeResult;
-        }
-
-        
-        
-        private String PlayerRanks_GetRanks(BasePlayer player)
-        {
-            if (!PlayerRanks || !config.ReferenceSetting.playerRanksSettings.UsePlayerRanks) return String.Empty;
-            String pRank = PlayerRanks.Call<String>("GetPlayerTitle", player.IPlayer);
-            
-            Object resultColorMessage = IsGradientColorValue(config.ReferenceSetting.playerRanksSettings.colorTag);
-            if (resultColorMessage is List<String> gradientColors)
-                pRank = ApplyGradientToText(pRank, gradientColors);
-            else pRank = $"<color={config.ReferenceSetting.playerRanksSettings.colorTag}>{pRank}</color>";
-
-            return pRank;
-        }
-
-        
-        
-        [ChatCommand("online")]
-        private void ShowPlayerOnline(BasePlayer player)
-        {
-            if (!config.OtherSetting.UseCommandOnline) return;
-            
-            String Message = String.Empty;
-            if (config.OtherSetting.UseCommandShortOnline)
-            {
-                Int32 shortCount = GetPlayersOnlineShort();
-                Message = GetLang("IQCHAT_INFO_ONLINE", player.UserIDString, $"{shortCount}");
-            }
-            else
-            {
-                List<String> PlayerNames = GetPlayersOnline();
-                Message = GetLang("IQCHAT_INFO_ONLINE", player.UserIDString, String.Join($"\n", PlayerNames));
-            }
-
-            ReplySystem(player, Message);
-            player.ConsoleMessage(Message);
-        }
-
-        
-                void OnGroupPermissionGranted(string name, string perm)
-        {
-            String[] PlayerGroups = permission.GetUsersInGroup(name);
-            if (PlayerGroups == null) return;
-
-            foreach (String playerInfo in PlayerGroups)
-            {
-                BasePlayer player = BasePlayer.FindByID(UInt64.Parse(playerInfo.Substring(0, 17)));
-                if (player == null) return;
-
-                SetupParametres(player.UserIDString, perm);
-            }
-        }
-        private enum SelectedParametres
-        {
-            DropList,
-            Slider
-        }
-        private const String PermissionRename = "iqchat.renameuse";
-        String IQRankGetTimeGame(ulong userID) => (string)(IQRankSystem?.Call("API_GET_TIME_GAME", userID));
-        public static String ApplyGradientToText(String text, List<String> colors)
-        {
-            String result = string.Empty;
-            Int32 colorCount = colors.Count;
-            Int32 textLength = text.Length;
-            
-            MatchCollection matches = regex.Matches(text);
-            
-            for (Int32 i = 0; i < textLength; i++)
-            {
-                Boolean isMatch = false;
-                foreach (Match match in matches)
-                {
-                    if (match.Index == i)
-                    {
-                        result += match.Value;
-                        i += match.Length - 1; 
-                        isMatch = true;
-                        break;
-                    }
-                }
-
-                if (!isMatch)
-                {
-                    int gradientColorIndex = (int)((float)i / textLength * colorCount);
-                    result += $"<color={colors[gradientColorIndex]}>{text[i]}</color>";
-                }
-            }
-
-            return result;
-        }
+        public string PermMuteMenu = "iqchat.muteuse";
         class Response
         {
             [JsonProperty("country")]
             public string Country { get; set; }
         }
-        private String JoinStringList(List<String> inputList) => String.Join(", ", inputList);
-        
-        
-        
-        private void DiscordLoggCommand(BasePlayer player, String Command, String[] Args)
-        {
-            Configuration.OtherSettings.General Commands = config.OtherSetting.LogsChatCommands;
-            if (!Commands.UseLogged || String.IsNullOrWhiteSpace(Commands.Webhooks)) return;
-
-            List<Fields> fields = new List<Fields>
-                        {
-                            new Fields(LanguageEn ? "Nick" : "Ник", player.displayName, true),
-                            new Fields("Steam64ID", player.UserIDString, true),
-                            new Fields(LanguageEn ? "Command" : "Команда", $"/{Command} ", true),
-                        };
-
-            String Arguments = String.Join(" ", Args);
-            if (Args != null && Arguments != null && Arguments.Length != 0 && !String.IsNullOrWhiteSpace(Arguments))
-                fields.Insert(fields.Count, new Fields(LanguageEn ? "Arguments" : "Аргументы", Arguments, false));
-
-            FancyMessage newMessage = new FancyMessage(null, false, new FancyMessage.Embeds[1] { new FancyMessage.Embeds(null, 10710525, fields, new Authors("IQChat Command-History", null, "https://i.postimg.cc/SshGgy52/xiwsg5m.png", null), null) });
-
-            Request($"{Commands.Webhooks}", newMessage.toJSON());
-        }
-        String API_GET_CHAT_COLOR(UInt64 ID)
-        {
-            if (!UserInformation.ContainsKey(ID)) return String.Empty;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            return UserInformation[ID].Info.ColorMessage;
-        }
-
-        [ChatCommand("hmute")]
-        void HideMute(BasePlayer Moderator, string cmd, string[] arg)
-        {
-            if (!permission.UserHasPermission(Moderator.UserIDString, PermissionMute)) return;
-            if (arg == null || arg.Length != 3 || arg.Length > 3)
-            {
-                ReplySystem(Moderator, LanguageEn ? "Invalid syntax, use : hmute Steam64ID/Nick Reason Time(seconds)" : "Неверный синтаксис,используйте : hmute Steam64ID/Ник Причина Время(секунды)");
-                return;
-            }
-            string NameOrID = arg[0];
-            string Reason = arg[1];
-            Int32 TimeMute = 0;
-            if (!Int32.TryParse(arg[2], out TimeMute))
-            {
-                ReplySystem(Moderator, LanguageEn ? "Enter the time in numbers!" : "Введите время цифрами!");
-                return;
-            }
-            BasePlayer target = GetPlayerNickOrID(NameOrID);
-            if (target == null)
-            {
-                UInt64 Steam64ID = 0;
-                if (UInt64.TryParse(NameOrID, out Steam64ID))
-                {
-                    if (UserInformation.ContainsKey(Steam64ID))
-                    {
-                        User Info = UserInformation[Steam64ID];
-                        if (Info == null) return;
-                        if (Info.MuteInfo.IsMute(MuteType.Chat))
-                        {
-                            ReplySystem(Moderator, LanguageEn ? "The player already has a chat lock" : "Игрок уже имеет блокировку чата");
-                            return;
-                        }
-
-                        Info.MuteInfo.SetMute(MuteType.Chat, TimeMute);
-                        ReplySystem(Moderator, LanguageEn ? "Chat blocking issued to offline player" : "Блокировка чата выдана offline-игроку");
-                        return;
-                    }
-                    else
-                    {
-                        ReplySystem(Moderator, LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                        return;
-                    }
-                }
-                else
-                {
-                    ReplySystem(Moderator, LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                    return;
-                }
-            }
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            MutePlayer(target, MuteType.Chat, 0, Moderator, Reason, TimeMute, true, true);
-        }
-        
-        
-        
-                [ChatCommand("rename")]
-        private void ChatCommandRename(BasePlayer Renamer, string command, string[] args)
-        {
-            if (!permission.UserHasPermission(Renamer.UserIDString, PermissionRename)) return;
-            GeneralInformation General = GeneralInfo;
-            if (General == null) return;
-
-            if (Renamer == null)
-            {
-                ReplySystem(Renamer, LanguageEn ? "You can only use this command while on the server" : "Вы можете использовать эту команду только находясь на сервере");
-                return;
-            }
-            if (args.Length == 0 || args == null)
-            {
-                ReplySystem(Renamer, lang.GetMessage("COMMAND_RENAME_NOTARG", this, Renamer.UserIDString));
-                return;
-            }
-
-            String Name = args[0];
-            UInt64 ID = Renamer.userID;
-            if (args.Length == 2 && args[1] != null && !String.IsNullOrWhiteSpace(args[1]))
-                if (!UInt64.TryParse(args[1], out ID))
-                {
-                    ReplySystem(Renamer, GetLang("COMMAND_RENAME_NOT_ID", Renamer.UserIDString));
-                    return;
-                }
-
-            if (General.RenameList.ContainsKey(Renamer.userID))
-            {
-                General.RenameList[Renamer.userID].RenameNick = Name;
-                General.RenameList[Renamer.userID].RenameID = ID;
-            }
-            else General.RenameList.Add(Renamer.userID, new GeneralInformation.RenameInfo { RenameNick = Name, RenameID = ID });
-
-            ReplySystem(Renamer, GetLang("COMMAND_RENAME_SUCCES", Renamer.UserIDString, Name, ID));
-            RenameUpdate(Renamer, Name);
-        }
-
-        Boolean API_IS_IGNORED(BasePlayer.EncryptedValue<UInt64> UserHas, BasePlayer.EncryptedValue<UInt64> User) => API_IS_IGNORED(UserHas.Get(), User.Get());
-        
-        private Boolean IsValidHexColor(String color)
-        {
-            const String pattern = @"^#(?:[0-9a-fA-F]{3}){1,2}$";
-            return Regex.IsMatch(color, pattern);
-        }
-        String API_GET_NICK_COLOR(ulong ID)
-        {
-            if (!UserInformation.ContainsKey(ID)) return String.Empty;
-
-            return UserInformation[ID].Info.ColorNick;
-        }
+        public static StringBuilder sb = new StringBuilder();
         public string GetLang(string LangKey, string userID = null, params object[] args)
         {
             sb.Clear();
@@ -3192,3417 +127,1238 @@ namespace Oxide.Plugins
             }
             return lang.GetMessage(LangKey, this, userID);
         }
-        
-        private List<FakePlayer> GetFilteredPlayers(string searchName)
-        {
-            var combinedPlayerList = GetCombinedPlayerList();
-            var filteredPlayers = combinedPlayerList;
+        #endregion
 
-            if (searchName != null)
-                filteredPlayers = filteredPlayers.Where(p => p.displayName.ToLower().Contains(searchName.ToLower())).ToList();
+        #region Configuration
 
-            filteredPlayers = filteredPlayers.OrderByDescending(p => !IsFakeUser(p.userId) &&
-                                                                     TryGetUserIdAsUlong(p.userId, out UInt64 userIdAsUlong) &&
-                                                                     UserInformation.ContainsKey(userIdAsUlong) &&
-                                                                     (UserInformation[userIdAsUlong].MuteInfo.IsMute(MuteType.Chat) || UserInformation[userIdAsUlong].MuteInfo.IsMute(MuteType.Voice))).ToList();
+        private static Configuration config = new Configuration();
+        private class Configuration
+        {
+            [JsonProperty("Права для смены ника")]
+            public string RenamePermission;
+            [JsonProperty("Настройка префиксов")]
+            public List<AdvancedFuncion> PrefixList = new List<AdvancedFuncion>();
+            [JsonProperty("Настройка цветов для ников")]
+            public List<AdvancedFuncion> NickColorList = new List<AdvancedFuncion>();
+            [JsonProperty("Настройка цветов для сообщений")]
+            public List<AdvancedFuncion> MessageColorList = new List<AdvancedFuncion>();
+            [JsonProperty("Настройка сообщений в чате")]
+            public MessageSettings MessageSetting;
+            [JsonProperty("Настройка мутов")]
+            public MuteController MuteControllers = new MuteController();
+            [JsonProperty("Настройка UI интерфейса")]
+            public Interface InterfaceChat;
+            [JsonProperty("Настройка оповещения")]
+            public AlertSetting AlertSettings;         
+            [JsonProperty("Настройка привилегий")]
+            public AutoSetups AutoSetupSetting;
+            [JsonProperty("Настройка Rust+")]
+            public RustPlus RustPlusSettings;
+            [JsonProperty("Дополнительная настройка")]
+            public OtherSettings OtherSetting;
+            [JsonProperty("Настройка автоответчика")]
+            public AnswerMessage AnswerMessages = new AnswerMessage();
 
-            return filteredPlayers;
-        }
-        Boolean API_CHECK_VOICE_CHAT(UInt64 ID)
-        {
-            if (!UserInformation.ContainsKey(ID)) return false;
-            return UserInformation[ID].MuteInfo.IsMute(MuteType.Voice);
-        }
-        void Unload()
-        {
-            InterfaceBuilder.DestroyAll();
-            
-            if (_imageUI != null)
+            [JsonProperty("Настройка плагинов поддержки")]
+            public ReferenceSettings ReferenceSetting = new ReferenceSettings();
+            internal class AdvancedFuncion
             {
-                _imageUI.UnloadImages();
-                _imageUI = null;
+                [JsonProperty("Права")]
+                public string Permissions;
+                [JsonProperty("Значение")]
+                public string Argument;
+            }
+            internal class AnswerMessage
+            {
+                [JsonProperty("Включить автоответчик?(true - да/false - нет)")]
+                public bool UseAnswer;
+                [JsonProperty("Настройка сообщений [Ключевое слово] = Ответ")]
+                public Dictionary<string, string> AnswerMessageList = new Dictionary<string, string>();
+            }
+            internal class RustPlus
+            {
+                [JsonProperty("Использовать Rust+")]
+                public bool UseRustPlus;
+                [JsonProperty("Название для уведомления Rust+")]
+                public string DisplayNameAlert;
             }
             
-            WriteData();
-            _ = null;
-        }
-        
-        [ChatCommand("rename.reset")]
-        private void ChatCommandRenameReset(BasePlayer Renamer)
-        {
-            if (Renamer == null)
+            internal class MuteController
             {
-                ReplySystem(Renamer, LanguageEn ? "You can only use this command while on the server" : "Вы можете использовать эту команду только находясь на сервере");
-                return;
-            }
-            
-            if (!permission.UserHasPermission(Renamer.UserIDString, PermissionRename)) return;
-            GeneralInformation General = GeneralInfo;
-            if (General == null) return;
+                [JsonProperty("Настройка причин блокировок чата")]
+                public List<ReasonMuteChat> ReasonListChat = new List<ReasonMuteChat>();
+                [JsonProperty("Настройка автоматического мута")]
+                public AutoMute AutoMuteSettings = new AutoMute();
+                internal class AutoMute
+                {
+                    [JsonProperty("Включить автоматический мут по запрещенным словам")]
+                    public bool UseAutoMute;
+                    [JsonProperty("Время автоматического мута")]
+                    public int MuteTime;
+                    [JsonProperty("Причина мута")]
+                    public string ReasonMute;
+                }
 
-            if (!General.RenameList.ContainsKey(Renamer.userID))
-            {
-                ReplySystem(Renamer, GetLang("COMMAND_RENAME_NOTHING", Renamer.UserIDString));
-                return;
+                internal class ReasonMuteChat
+                {
+                    [JsonProperty("Причина мута")]
+                    public string Reason;
+                    [JsonProperty("Время мута")]
+                    public int TimeMute;
+                }
             }
-            
-            General.RenameList.Remove(Renamer.userID);
-            RenameReset(Renamer);
+
+            internal class ReferenceSettings
+            {
+                [JsonProperty("Настройка XDNotifications")]
+                public XDNotifications XDNotificationsSettings = new XDNotifications();
+                [JsonProperty("Настройка IQModalMenu")]
+                public IQModalMenu IQModalMenuSettings = new IQModalMenu();
+                [JsonProperty("Настройка IQFakeActive")]
+                public IQFakeActive IQFakeActiveSettings = new IQFakeActive();
+                [JsonProperty("Настройка IQRankSystem")]
+                public IQRankSystem IQRankSystems = new IQRankSystem();
+
+                internal class IQModalMenu
+                {
+                    [JsonProperty("Спрайт на кнопку в модальном меню")]
+                    public string Sprite;
+                    [JsonProperty("Ссылка на кнопку в модальном меню(имеет приоритет над спрайтом)")]
+                    public string Avatar;
+                }
+
+                internal class XDNotifications
+                {
+                    [JsonProperty("Включить поддержку XDNotifications(UI уведомления будут заменены на уведомление с XDNotifications)")]
+                    public bool UseXDNotifications;
+                    [JsonProperty("Цвет заднего фона уведомления(HEX)")]
+                    public string Color;
+                    [JsonProperty("Через сколько удалиться уведомление")]
+                    public int AlertDelete;
+                    [JsonProperty("Звуковой эффект")]
+                    public string SoundEffect;
+                }
+                internal class IQRankSystem
+                {
+                    [JsonProperty("Использовать поддержку рангов")]
+                    public bool UseRankSystem;
+                    [JsonProperty("Отображать игрокам их отыгранное время рядом с рангом")]
+                    public bool UseTimeStandart;
+                }
+                internal class IQFakeActive
+                {
+                    [JsonProperty("Использовать поддержку IQFakeActive")]
+                    public bool UseIQFakeActive;
+                }
+            }
+            internal class AutoSetups
+            {
+                [JsonProperty("Настройки сброса привилегий")]
+                public ReturnDefault ReturnDefaultSetting = new ReturnDefault();
+                [JsonProperty("Автоматической установки префиксов/цвета ника/цвета чата")]
+                public SetupAuto SetupAutoSetting = new SetupAuto();
+                internal class ReturnDefault
+                {
+                    [JsonProperty("Сбрасывать автоматически префикс при окончании его прав")]
+                    public bool UseDropPrefix;
+                    [JsonProperty("Сбрасывать автоматически цвет ника при окончании его прав")]
+                    public bool UseDropColorNick;
+                    [JsonProperty("Сбрасывать автоматически цвет чата при окончании его прав")]
+                    public bool UseDropColorChat;
+
+                    [JsonProperty("При окончании префикса, установится данный префикс")]
+                    public string PrefixDefault;
+                    [JsonProperty("При окончании цвета ника, установится данный цвет")]
+                    public string NickDefault;
+                    [JsonProperty("При окончании цвета сообщения, установится данный цвета")]
+                    public string MessageDefault;
+                }
+                internal class SetupAuto
+                {
+                    [JsonProperty("Устанавливать автоматически префикс при получении его прав")]
+                    public bool UseSetupAutoPrefix;
+                    [JsonProperty("Устанавливать автоматически цвет ника при получении его прав")]
+                    public bool UseSetupAutoColorNick;
+                    [JsonProperty("Устанавливать автоматически цвет чата при получении его прав")]
+                    public bool UseSetupAutoColorChat;
+
+                }
+            }
+            internal class MessageSettings
+            {
+                [JsonProperty("Включить форматирование сообщений")]
+                public bool FormatingMessage;
+                [JsonProperty("Включить личные сообщения")]
+                public bool PMActivate;
+                [JsonProperty("Включить игнор ЛС игрокам(/ignore nick)")]
+                public bool IgnoreUsePM;
+                [JsonProperty("Включить Анти-Спам")]
+                public bool AntiSpamActivate;
+                [JsonProperty("Скрыть из чата выдачу предметов Админу")]
+                public bool HideAdminGave;
+                [JsonProperty("Использовать список запрещенных слов?")]
+                public bool UseBadWords;
+                [JsonProperty("Включить возможность использовать несколько префиксов сразу")]
+                public bool MultiPrefix;
+                [JsonProperty("Переносить мут в командный чат(В случае мута,игрок не сможет писать даже в командный чат)")]
+                public bool MuteTeamChat;
+                [JsonProperty("Пермишенс для иммунитета к антиспаму")]
+                public string PermAdminImmunitetAntispam;
+                [JsonProperty("Наименование оповещения в чат")]
+                public string BroadcastTitle;
+                [JsonProperty("Наименование упоминания игрока в чате")]
+                public string AlertPlayerTitle; 
+                [JsonProperty("Цвет сообщения упоминания игрока в чате")]
+                public string AlertPlayerColor;
+                [JsonProperty("Цвет сообщения оповещения в чат")]
+                public string BroadcastColor;
+                [JsonProperty("На какое сообщение заменять плохие слова")]
+                public string ReplaceBadWord;
+                [JsonProperty("Звук при при получении личного сообщения")]
+                public string SoundPM;     
+                [JsonProperty("Звук при при получении и отправки упоминания через @")]
+                public string SoundAlertPlayer;            
+                [JsonProperty("Время,через которое удалится сообщение с UI от администратора")]
+                public int TimeDeleteAlertUI;
+                [JsonProperty("Steam64ID для аватарки в чате")]
+                public ulong Steam64IDAvatar;
+                [JsonProperty("Время через которое игрок может отправлять сообщение (АнтиСпам)")]
+                public int FloodTime;
+                [JsonProperty("Список плохих слов")]
+                public List<string> BadWords = new List<string>();
+            }
+            internal class Interface
+            {
+                [JsonProperty("HEX : Для задней панели")]
+                public string HexPanel;
+                [JsonProperty("HEX : Для титульной панели")]
+                public string HexTitle;
+                [JsonProperty("HEX : Для кнопок")]
+                public string HexButton;
+                [JsonProperty("HEX : Для текста")]
+                public string HexLabel;
+                [JsonProperty("HEX : Кнопки с активной страницей")]
+                public string HexPageButtonActive;
+                [JsonProperty("HEX : Кнопки с неактивной страницей")]
+                public string HexPageButtonInActive;    
+                [JsonProperty("HEX : Блюра для меню")]
+                public string HexBlurMute;
+
+                [JsonProperty("Настройка расположения основного UI")]
+                public InterfacePosition InterfacePositions;
+                [JsonProperty("Настройка расположения UI уведомления")]
+                public AlertInterfaceSettings AlertInterfaceSetting;
+                [JsonProperty("Дополнительная настройка UI интерфейса")]
+                public OtherSettingsInterface OtherSettingInterface;
+
+                internal class InterfacePosition
+                {
+                    [JsonProperty("Настройка основного меню")]
+                    public MainPanel MainPanels;
+                    [JsonProperty("Настройка панели управления блокировками чата")]
+                    public MutePanel MutePanels;        
+                    [JsonProperty("Настройка панели управления игнорированием чата")]
+                    public IgnoredPanel IgnoredPanels;
+
+                    internal class MutePanel
+                    {
+                        [JsonProperty("AnchorMin целевого UI в меню управленяи блокировкой чата")]
+                        public string BackgroundAnchorMin;
+                        [JsonProperty("AnchorMax основного UI в меню управленяи блокировкой чата")]
+                        public string BackgroundAnchorMax;
+                    }         
+                    
+                    internal class IgnoredPanel
+                    {
+                        [JsonProperty("AnchorMin целевого UI в меню управленяи игнорировани")]
+                        public string BackgroundAnchorMin;
+                        [JsonProperty("AnchorMax основного UI")]
+                        public string BackgroundAnchorMax;
+                    }
+
+                    internal class MainPanel 
+                    {
+                        [JsonProperty("Настройка блока с информацией в меню")]
+                        public InfromationBlocks InfromationBlock;     
+                        [JsonProperty("Настройка блока администрирования в меню")]
+                        public ModerationBlocks ModerationBlock;   
+                        [JsonProperty("Настройка блока с настройками в меню")]
+                        public SettingBlocks SettingBlock;     
+                        [JsonProperty("Настройка блока с слайдерами и дроплистами в меню")]
+                        public SliderAndDropListBlocks SliderAndDropListBlock;
+
+                        [JsonProperty("AnchorMin целевого меню")]
+                        public string BackgroundAnchorMin;
+                        [JsonProperty("AnchorMax основного меню")]
+                        public string BackgroundAnchorMax;
+
+                        [JsonProperty("AnchorMin панели с контентом в меню (тут расположены кнопки и другая информация)")]
+                        public string ContentAnchorMin;
+                        [JsonProperty("AnchorMax панели с контентом в меню (тут расположены кнопки и другая информация)")]
+                        public string ContentAnchorMax;
+
+                        [JsonProperty("AnchorMin титульной панели в меню")]
+                        public string TitleAnchorMin;
+                        [JsonProperty("AnchorMax титульной панели в меню")]
+                        public string TitleAnchorMax;
+
+                        [JsonProperty("AnchorMin кнопки закрытия")]
+                        public string CloseButtonAnchorMin;
+                        [JsonProperty("AnchorMax кнопки закрытия")]
+                        public string CloseButtonAnchorMax;    
+                        
+                        [JsonProperty("AnchorMin текста в титульной панели")]
+                        public string TitleLabelAnchorMin;
+                        [JsonProperty("AnchorMax текста в титульной панели")]
+                        public string TitleLabelAnchorMax;
+
+                        internal class InfromationBlocks 
+                        {
+                            [JsonProperty("AnchorMin текста заголовка в блоке информации")]
+                            public string TitleLabelAnchorMin;
+                            [JsonProperty("AnchorMax текста заголовка в блоке информации")]
+                            public string TitleLabelAnchorMax;   
+                            
+                            [JsonProperty("AnchorMin текста с информаций о блокировке чата")]
+                            public string MutedLabelAnchorMin;
+                            [JsonProperty("AnchorMax текста с информацией о блокировке чата")]
+                            public string MutedLabelAnchorMax;       
+                            
+                            [JsonProperty("AnchorMin текста с информаций о нике игрока")]
+                            public string NickPlayerAnchorMin;
+                            [JsonProperty("AnchorMax текста с информацией о нике игрока")]
+                            public string NickPlayerAnchorMax;              
+                            
+                            [JsonProperty("AnchorMin титульного текста о игнорированных игроках")]
+                            public string IgnoredLabelAnchorMin;
+                            [JsonProperty("AnchorMax титульного текста о игнорировванных игроках")]
+                            public string IgnoredLabelAnchorMax;      
+                            
+                            [JsonProperty("AnchorMin кнопки с игнор-меню")]
+                            public string IgnoredButtonAnchorMin;
+                            [JsonProperty("AnchorMax кнопки с игнор-меню")]
+                            public string IgnoredButtonAnchorMax;
+                        }
+
+                        internal class ModerationBlocks
+                        {
+                            [JsonProperty("AnchorMin текста заголовка в блоке администрирования")]
+                            public string TitleLabelAnchorMin;
+                            [JsonProperty("AnchorMax текста заголовка в блоке администрирования")]
+                            public string TitleLabelAnchorMax;     
+                            
+                            [JsonProperty("AnchorMin кнопки с меню блокировки чата")]
+                            public string ButtonMuteAnchorMin;
+                            [JsonProperty("AnchorMax кнопки с меню блокировки чата")]
+                            public string ButtonMuteAnchorMax;        
+                            
+                            [JsonProperty("AnchorMin кнопки с блокировкой чата всем игрокам")]
+                            public string ButtonMuteAllAnchorMin;
+                            [JsonProperty("AnchorMax кнопки с блокировкой чата всем игрокам")]
+                            public string ButtonMuteAllAnchorMax;          
+                            
+                            [JsonProperty("AnchorMin кнопки с блокировкой голосового чата всем игрокам")]
+                            public string ButtonMuteVoiceAllAnchorMin;
+                            [JsonProperty("AnchorMax кнопки с блокировкой голосового чата всем игрокам")]
+                            public string ButtonMuteVoiceAllAnchorMax;
+                        }
+
+                        internal class SliderAndDropListBlocks
+                        {
+                            [JsonProperty("AnchorMin заголовка слайдера/дроп листа рангов")]
+                            public string TitleSliderAndDropListRankAnchorMin;
+                            [JsonProperty("AnchorMax заголовка слайдера/дроп листа рангов")]
+                            public string TitleSliderAndDropListRankAnchorMax;
+
+                            [JsonProperty("AnchorMin слайдера/дроп листа рангов")]
+                            public string SliderAndDropListRankAnchorMin;
+                            [JsonProperty("AnchorMax слайдера/дроп листа рангов")]
+                            public string SliderAndDropListRankAnchorMax;
+
+                            [JsonProperty("AnchorMin заголовка слайдера/дроп листа цвета сообщения в чате")]
+                            public string TitleSliderAndDropListChatColorAnchorMin;
+                            [JsonProperty("AnchorMax заголовка слайдера/дроп листа цвета сообщения в чате")]
+                            public string TitleSliderAndDropListChatColorAnchorMax;
+
+                            [JsonProperty("AnchorMin слайдера/дроп листа цвета сообщения в чате")]
+                            public string SliderAndDropListChatColorAnchorMin;
+                            [JsonProperty("AnchorMax слайдера/дроп листа цвета сообщения в чате")]
+                            public string SliderAndDropListChatColorAnchorMax;
+
+                            [JsonProperty("AnchorMin заголовка слайдера/дроп листа цвета ника в чате")]
+                            public string TitleSliderAndDropListNickColorAnchorMin;
+                            [JsonProperty("AnchorMax заголовка слайдера/дроп листа цвета ника в чате")]
+                            public string TitleSliderAndDropListNickColorAnchorMax;
+
+                            [JsonProperty("AnchorMin слайдера/дроп листа цвета ника в чате")]
+                            public string SliderAndDropListNickColorAnchorMin;
+                            [JsonProperty("AnchorMax слайдера/дроп листа цвета ника в чате")]
+                            public string SliderAndDropListNickColorAnchorMax;
+
+                            [JsonProperty("AnchorMin заголовка слайдера/дроп листа префикса в чате")]
+                            public string TitleSliderAndDropListPrefixAnchorMin;
+                            [JsonProperty("AnchorMax заголовка слайдера/дроп листа префикса в чате")]
+                            public string TitleSliderAndDropListPrefixAnchorMax;
+
+                            [JsonProperty("AnchorMin слайдера/дроп листа префикса в чате")]
+                            public string SliderAndDropListPrefixAnchorMin;
+                            [JsonProperty("AnchorMax слайдера/дроп листа префикса в чате")]
+                            public string SliderAndDropListPrefixAnchorMax;
+                        }
+
+                        internal class SettingBlocks
+                        {
+                            [JsonProperty("AnchorMin заголовка в блоке настроек")]
+                            public string TitleSettingAnchorMin;
+                            [JsonProperty("AnchorMax заголовка в блоке настроек")]
+                            public string TitleSettingAnchorMax;
+
+                            [JsonProperty("AnchorMin текста настройки личных сообщений")]
+                            public string SettingPMLabelAnchorMin;
+                            [JsonProperty("AnchorMax текста настройки личных сообщений")]
+                            public string SettingPMLabelAnchorMax;
+
+                            [JsonProperty("AnchorMin текста настройки автоматических сообщений")]
+                            public string SettingBroadcastAnchorMin;
+                            [JsonProperty("AnchorMax текста настройки автоматических сообщений")]
+                            public string SettingBroadcastAnchorMax;
+
+                            [JsonProperty("AnchorMin текста настройки упоминания в чате")]
+                            public string SettingAlertAnchorMin;
+                            [JsonProperty("AnchorMax текста настройки упоминания в чате")]
+                            public string SettingAlertAnchorMax;
+
+                            [JsonProperty("AnchorMin текста настройки звукового оповещения")]
+                            public string SettingSoundAnchorMin;
+                            [JsonProperty("AnchorMax текста настройки звукового оповещения")]
+                            public string SettingSoundAnchorMax;
+
+                            [JsonProperty("AnchorMin бокса настройки личных сообщений")]
+                            public string BoxSettingPMLabelAnchorMin;
+                            [JsonProperty("AnchorMax бокса настройки личных сообщений")]
+                            public string BoxSettingPMLabelAnchorMax;
+
+                            [JsonProperty("AnchorMin бокса настройки автоматических сообщений")]
+                            public string BoxSettingBroadcastAnchorMin;
+                            [JsonProperty("AnchorMax бокса настройки автоматических сообщений")]
+                            public string BoxSettingBroadcastAnchorMax;
+
+                            [JsonProperty("AnchorMin бокса настройки упоминания в чате")]
+                            public string BoxSettingAlertAnchorMin;
+                            [JsonProperty("AnchorMax бокса настройки упоминания в чате")]
+                            public string BoxSettingAlertAnchorMax;
+
+                            [JsonProperty("AnchorMin бокса настройки звукового оповещения")]
+                            public string BoxSettingSoundAnchorMin;
+                            [JsonProperty("AnchorMax бокса настройки звукового оповещения")]
+                            public string BoxSettingSoundAnchorMax;
+                        }
+                    }
+                }
+
+                internal class OtherSettingsInterface
+                {
+                    [JsonProperty("Использовать выпадающий список на префиксах(иначе будет слайдер)")]
+                    public bool DropListPrefixUse;
+                    [JsonProperty("Использовать выпадающий список на цветах ника(иначе будет слайдер)")]
+                    public bool DropListColorNickUse;
+                    [JsonProperty("Использовать выпадающий список на цветах чата(иначе будет слайдер)")]
+                    public bool DropListColorChatUse;
+                    [JsonProperty("Использовать выпадающий список на рангах(IQRankSystem)(иначе будет слайдер)")]
+                    public bool DropListRankUse;
+                }
+
+                internal class AlertInterfaceSettings
+                {
+                    [JsonProperty("AnchorMin")]
+                    public string AnchorMin;
+                    [JsonProperty("AnchorMax")]
+                    public string AnchorMax;
+                    [JsonProperty("OffsetMin")]
+                    public string OffsetMin;
+                    [JsonProperty("OffsetMax")]
+                    public string OffsetMax;
+                }
+            }
+
+            internal class AlertSetting
+            {
+                [JsonProperty("Включить случайное сообщение зашедшему игроку")]
+                public bool WelcomeMessageUse;
+                [JsonProperty("Список сообщений игроку при входе")]
+                public List<string> WelcomeMessage = new List<string>();
+                [JsonProperty("Уведомлять о входе игрока в чат")]
+                public bool ConnectedAlert;
+                [JsonProperty("Уведомлять о входе админа на сервер в чат")]
+                public Boolean ConnectedAlertAdmin;
+                [JsonProperty("Уведомлять о выходе админа на сервер в чат")]
+                public Boolean DisconnectedAlertAdmin;
+                [JsonProperty("Включить случайные уведомления о входе игрока из списка")]
+                public bool ConnectionAlertRandom;
+                [JsonProperty("Случайные уведомления о входе игрока({0} - ник игрока, {1} - страна(если включено отображение страны)")]
+                public List<string> RandomConnectionAlert = new List<string>();
+                [JsonProperty("Отображать страну зашедшего игрока")]
+                public bool ConnectedWorld;
+                [JsonProperty("Уведомлять о выходе игрока в чат из списка")]
+                public bool DisconnectedAlert;
+                [JsonProperty("Включить случайные уведомления о входе игрока")]
+                public bool DisconnectedAlertRandom;
+                [JsonProperty("Случайные уведомления о входе игрока({0} - ник игрока, {1} - причина выхода(если включена причина)")]
+                public List<string> RandomDisconnectedAlert = new List<string>();
+                [JsonProperty("Отображать причину выхода игрока")]
+                public bool DisconnectedReason;
+                [JsonProperty("При уведомлении о входе/выходе игрока отображать его аватар напротив ника")]
+                public bool ConnectedAvatarUse;
+                [JsonProperty("Включить автоматические сообщения в чат")]
+                public bool AlertMessage;
+                [JsonProperty("Тип автоматических сообщений : true - поочередные/false - случайные")]
+                public bool AlertMessageType;
+                [JsonProperty("Настройка отправки автоматических сообщений в чат")]
+                public List<string> MessageList;
+                [JsonProperty("Интервал отправки сообщений в чат(Броадкастер)")]
+                public int MessageListTimer;
+            }
+            internal class OtherSettings
+            {
+                [JsonProperty("Использовать дискорд")]
+                public bool UseDiscord;
+                [JsonProperty("Вебхук для логирования чата в дискорд")]
+                public string WebhooksChatLog;
+                [JsonProperty("Вебхук для логирования информации о мутах в дискорде")]
+                public string WebhooksMuteInfo;
+            }
+
+            public static Configuration GetNewConfiguration()
+            {
+                return new Configuration
+                {
+                    PrefixList = new List<AdvancedFuncion>
+                    {
+                        new AdvancedFuncion
+                        {
+                            Permissions = "iqchat.default",
+                            Argument = "<color=yellow><b>[+]</b></color>",
+                        },
+                        new AdvancedFuncion
+                        {
+                            Permissions = "iqchat.default",
+                            Argument = "<color=yellow><b>[ИГРОК]</b></color>",
+                        },
+                        new AdvancedFuncion
+                        {
+                            Permissions = "iqchat.vip",
+                            Argument = "<color=yellow><b>[VIP]</b></color>",
+                        },
+                    },
+                    NickColorList = new List<AdvancedFuncion>
+                    {
+                        new AdvancedFuncion
+                        {
+                            Permissions = "iqchat.default",
+                            Argument = "#DBEAEC",
+                        },
+                        new AdvancedFuncion
+                        {
+                            Permissions = "iqchat.default",
+                            Argument = "#FFC428",
+                        },
+                        new AdvancedFuncion
+                        {
+                            Permissions = "iqchat.vip",
+                            Argument = "#45AAB4",
+                        },
+                    },
+                    MessageColorList = new List<AdvancedFuncion>
+                    {
+                        new AdvancedFuncion
+                        {
+                            Permissions = "iqchat.default",
+                            Argument = "#DBEAEC",
+                        },
+                        new AdvancedFuncion
+                        {
+                            Permissions = "iqchat.default",
+                            Argument = "#FFC428",
+                        },
+                        new AdvancedFuncion
+                        {
+                            Permissions = "iqchat.vip",
+                            Argument = "#45AAB4",
+                        },
+                    },
+                    AutoSetupSetting = new AutoSetups
+                    {
+                        ReturnDefaultSetting = new AutoSetups.ReturnDefault
+                        {
+                            UseDropColorChat = true,
+                            UseDropColorNick = true,
+                            UseDropPrefix = true,
+
+                            PrefixDefault = "",
+                            NickDefault = "",
+                            MessageDefault = "",
+                        },
+                        SetupAutoSetting = new AutoSetups.SetupAuto
+                        {
+                            UseSetupAutoColorChat = true,
+                            UseSetupAutoColorNick = true,
+                            UseSetupAutoPrefix = true,
+                        }
+                    },
+                    RustPlusSettings = new RustPlus
+                    {
+                        UseRustPlus = true,
+                        DisplayNameAlert = "СУПЕР СЕРВЕР",
+                    },
+                    MessageSetting = new MessageSettings
+                    {
+                        UseBadWords = true,
+                        HideAdminGave = true,
+                        IgnoreUsePM = true,
+                        MuteTeamChat = true,
+                        PermAdminImmunitetAntispam = "iqchat.adminspam",
+                        BroadcastTitle = "<color=#F65050FF><b>[ОПОВЕЩЕНИЕ]</b></color>",
+                        AlertPlayerTitle = "<color=#A7F64FFF><b>[УПОМИНАНИЕ]</b></color>",
+                        AlertPlayerColor = "#efedee",
+                        BroadcastColor = "#efedee",
+                        ReplaceBadWord = "Ругаюсь матом",
+                        Steam64IDAvatar = 0,
+                        TimeDeleteAlertUI = 5,
+                        PMActivate = true,
+                        SoundAlertPlayer = "assets/bundled/prefabs/fx/notice/item.select.fx.prefab",
+                        SoundPM = "assets/bundled/prefabs/fx/notice/stack.world.fx.prefab",
+                        AntiSpamActivate = true,
+                        FloodTime = 5,
+                        FormatingMessage = true,
+                        MultiPrefix = true,
+                        BadWords = new List<string> { "хуй", "гей", "говно", "бля", "тварь" }
+                    },
+                    MuteControllers = new MuteController
+                    {
+                        AutoMuteSettings = new MuteController.AutoMute
+                        {
+                            UseAutoMute = false,
+                            MuteTime = 600,
+                            ReasonMute = "Ненормативная лексика"
+                        },
+                        ReasonListChat = new List<MuteController.ReasonMuteChat>
+                        {
+                            new MuteController.ReasonMuteChat
+                            {
+                                Reason = "Оскорбление родителей",
+                                TimeMute = 1200,
+                            },
+                            new MuteController.ReasonMuteChat
+                            {
+                                Reason = "Оскорбление игроков",
+                                TimeMute = 100
+                            }
+                        },
+                    },
+                    RenamePermission = "iqchat.renameuse",                  
+                    AlertSettings = new AlertSetting
+                    {
+                        ConnectedAlertAdmin = false,
+                        DisconnectedAlertAdmin = false,
+                        MessageListTimer = 60,
+                        AlertMessageType = false,
+                        WelcomeMessageUse = true,
+                        ConnectionAlertRandom = false,
+                        DisconnectedAlertRandom = false,
+                        RandomConnectionAlert = new List<string>
+                        {
+                            "{0} влетел как дурачок из {1}",
+                            "{0} залетел на сервер из {1}, соболезнуем",
+                            "{0} прыгнул на сервачок"
+                        },
+                        RandomDisconnectedAlert = new List<string>
+                        {
+                            "{0} ушел в мир иной",
+                            "{0} вылетел с сервера с причиной {1}",
+                            "{0} пошел на другой сервачок"
+                        },
+                        ConnectedAlert = true,
+                        ConnectedWorld = true,
+                        DisconnectedAlert = true,
+                        DisconnectedReason = true,
+                        AlertMessage = true,
+                        ConnectedAvatarUse = true,
+                        MessageList = new List<string>
+                        {
+                        "Автоматическое сообщение #1",
+                        "Автоматическое сообщение #2",
+                        "Автоматическое сообщение #3",
+                        "Автоматическое сообщение #4",
+                        "Автоматическое сообщение #5",
+                        "Автоматическое сообщение #6",
+                        },
+                        WelcomeMessage = new List<string>
+                        {
+                            "Добро пожаловать на сервер SUPERSERVER\nРады,что выбрал именно нас!",
+                            "С возвращением на сервер!\nЖелаем тебе удачи",
+                            "Добро пожаловать на сервер\nУ нас самые лучшие плагины",
+                        },
+
+                    },
+                    InterfaceChat = new Interface
+                    {
+                        HexPanel = "#3B3A2EFF",
+                        HexTitle = "#1B211BFF",
+                        HexButton = "#252a24",
+                        HexLabel = "#efedee",   
+                        HexPageButtonActive = "#3B3A2EFF",
+                        HexPageButtonInActive = "#3B3A2EB9",
+                        HexBlurMute = "#3B3A2EC4",
+
+                        InterfacePositions = new Interface.InterfacePosition
+                        {
+                            MainPanels = new Interface.InterfacePosition.MainPanel
+                            {
+                                BackgroundAnchorMin = "0.6625 0.1186",
+                                BackgroundAnchorMax = "0.9869678 0.8814",
+
+                                ContentAnchorMin = "0 0",
+                                ContentAnchorMax = "1 0.8896463",
+
+                                TitleAnchorMin = "0 0.8896463",
+                                TitleAnchorMax = "1 1",
+
+                                CloseButtonAnchorMin = "0.9037238 0.3409882",
+                                CloseButtonAnchorMax = "0.95509 0.6929768",
+
+                                TitleLabelAnchorMin = "0.04494545 0",
+                                TitleLabelAnchorMax = "0.739994 1",
+
+                                InfromationBlock = new Interface.InterfacePosition.MainPanel.InfromationBlocks
+                                {
+                                    TitleLabelAnchorMin = "0.04152404 0.5224559",
+                                    TitleLabelAnchorMax = "0.6196045 0.5934054",
+
+                                    MutedLabelAnchorMin = "0.04152404 0.4078422",
+                                    MutedLabelAnchorMax = "0.9486688 0.46788",
+
+                                    NickPlayerAnchorMin = "0.04152404 0.4610541",
+                                    NickPlayerAnchorMax = "0.9486688 0.5210921",
+
+                                    IgnoredLabelAnchorMin = "0.04152405 0.3559946",
+                                    IgnoredLabelAnchorMax = "0.5168719 0.4160324",
+
+                                    IgnoredButtonAnchorMin = "0.443033 0.366909",
+                                    IgnoredButtonAnchorMax = "0.9584759 0.4173968",
+                                },
+                                ModerationBlock = new Interface.InterfacePosition.MainPanel.ModerationBlocks
+                                {
+                                    TitleLabelAnchorMin = "0.04152405 0.2482094",
+                                    TitleLabelAnchorMax = "0.9390378 0.3191593",
+
+                                    ButtonMuteAnchorMin = "0.04152405 0.1677083",
+                                    ButtonMuteAnchorMax = "0.9584759 0.238659",
+
+                                    ButtonMuteAllAnchorMin = "0.04152405 0.0913007",
+                                    ButtonMuteAllAnchorMax = "0.9584759 0.1622516",
+
+                                    ButtonMuteVoiceAllAnchorMin = "0.04152405 0.01489319",
+                                    ButtonMuteVoiceAllAnchorMax = "0.9584759 0.08584419",
+                                },
+                                SliderAndDropListBlock = new Interface.InterfacePosition.MainPanel.SliderAndDropListBlocks
+                                {
+                                    TitleSliderAndDropListRankAnchorMin = "0.04152405 0.761226",
+                                    TitleSliderAndDropListRankAnchorMax = "0.4430331 0.8103468",
+
+                                    SliderAndDropListRankAnchorMin = "0.4430331 0.7653192",
+                                    SliderAndDropListRankAnchorMax = "0.9584759 0.81",
+
+                                    TitleSliderAndDropListChatColorAnchorMin = "0.04152405 0.8117096",
+                                    TitleSliderAndDropListChatColorAnchorMax = "0.4430331 0.8649233",
+
+                                    SliderAndDropListChatColorAnchorMin = "0.4430331 0.8198956",
+                                    SliderAndDropListChatColorAnchorMax = "0.9584758 0.8645764",
+
+                                    TitleSliderAndDropListNickColorAnchorMin = "0.04152405 0.8717443",
+                                    TitleSliderAndDropListNickColorAnchorMax = "0.4430331 0.9194997",
+
+                                    SliderAndDropListNickColorAnchorMin = "0.4430331 0.8744721",
+                                    SliderAndDropListNickColorAnchorMax = "0.9584758 0.9191527",
+
+                                    TitleSliderAndDropListPrefixAnchorMin = "0.04152405 0.9222281",
+                                    TitleSliderAndDropListPrefixAnchorMax = "0.4430331 0.9740761",
+
+                                    SliderAndDropListPrefixAnchorMin = "0.4430331 0.9290484",
+                                    SliderAndDropListPrefixAnchorMax = "0.9584758 0.9737292",
+                                },
+                                SettingBlock = new Interface.InterfacePosition.MainPanel.SettingBlocks
+                                {
+                                    TitleSettingAnchorMin = "0.04152405 0.6779985",
+                                    TitleSettingAnchorMax = "0.6196045 0.7489485",
+
+                                    SettingPMLabelAnchorMin = "0.04312925 0.6411574",
+                                    SettingPMLabelAnchorMax = "0.4125344 0.6779992",
+
+                                    SettingBroadcastAnchorMin = "0.04312925 0.5974963",
+                                    SettingBroadcastAnchorMax = "0.4125344 0.6343381",
+
+                                    SettingAlertAnchorMin = "0.584079 0.6411574",
+                                    SettingAlertAnchorMax = "0.9534805 0.6779992",
+
+                                    SettingSoundAnchorMin = "0.584079 0.5974963",
+                                    SettingSoundAnchorMax = "0.9534805 0.6343381",
+
+                                    BoxSettingPMLabelAnchorMin = "0.38664 0.6425239",
+                                    BoxSettingPMLabelAnchorMax = "0.4251647 0.67527",
+
+                                    BoxSettingBroadcastAnchorMin = "0.38664 0.5988628",
+                                    BoxSettingBroadcastAnchorMax = "0.4251647 0.6316",
+                                    
+                                    BoxSettingSoundAnchorMin = "0.5600009 0.5988628",
+                                    BoxSettingSoundAnchorMax = "0.5985249 0.6316088",
+
+                                    BoxSettingAlertAnchorMin = "0.5600009 0.6425239",
+                                    BoxSettingAlertAnchorMax = "0.5985249 0.67527",
+                                },
+                            },
+                            MutePanels = new Interface.InterfacePosition.MutePanel
+                            {
+                                BackgroundAnchorMin = "0.0130322 0.1186",
+                                BackgroundAnchorMax = "0.6588541 0.8814",
+                            },
+                            IgnoredPanels = new Interface.InterfacePosition.IgnoredPanel
+                            {
+                                BackgroundAnchorMin = "0.0130322 0.1186",
+                                BackgroundAnchorMax = "0.6588541 0.8814"
+                            }
+                        },
+                        AlertInterfaceSetting = new Interface.AlertInterfaceSettings
+                        {
+                            AnchorMin = "0 1",
+                            AnchorMax = "0 1",
+                            OffsetMin = "10 -70",
+                            OffsetMax = "330 -20"
+                        },
+                        OtherSettingInterface = new Interface.OtherSettingsInterface
+                        {
+                            DropListColorChatUse = false,
+                            DropListColorNickUse = false,
+                            DropListPrefixUse = false,
+                            DropListRankUse = false,
+                        }
+                    },
+                    OtherSetting = new OtherSettings
+                    {
+                        UseDiscord = false,
+                        WebhooksChatLog = "",
+                        WebhooksMuteInfo = "",
+                    },
+                    AnswerMessages = new AnswerMessage
+                    {
+                        UseAnswer = true,
+                        AnswerMessageList = new Dictionary<string, string>
+                        {
+                            ["вайп"] = "Вайп будет 27.06",
+                            ["wipe"] = "Вайп будет 27.06",
+                            ["читер"] = "Нашли читера?Напиши /report и отправь жалобу"
+                        }
+                    },
+                    ReferenceSetting = new ReferenceSettings
+                    {
+                        XDNotificationsSettings = new ReferenceSettings.XDNotifications
+                        {                         
+                            UseXDNotifications = false,
+                            AlertDelete = 5,
+                            Color = "#762424FF",
+                            SoundEffect = "",
+                        },
+                        IQFakeActiveSettings = new ReferenceSettings.IQFakeActive
+                        {
+                            UseIQFakeActive = true,
+                        },
+                        IQRankSystems = new ReferenceSettings.IQRankSystem
+                        {
+                            UseRankSystem = false,
+                            UseTimeStandart = true
+                        },
+                        IQModalMenuSettings = new ReferenceSettings.IQModalMenu
+                        {
+                            Sprite = "assets/icons/translate.png",
+                            Avatar = "",
+                        }
+                    }
+                };
+            }
         }
 
-        private static IQChat _;
-        private const String PermissionHideMuteName = "iqchat.hidemutename";
-
-        private void RegisteredPermissions()
+        protected override void LoadConfig()
         {
-            Configuration.ControllerParameters Controller = config.ControllerParameter;
-            IEnumerable<Configuration.ControllerParameters.AdvancedFuncion> Parametres = Controller.Prefixes.Prefixes
-                .Concat(Controller.NickColorList).Concat(Controller.MessageColorList);
+            base.LoadConfig();
+            try
+            {
+                config = Config.ReadObject<Configuration>();
+                if (config == null) LoadDefaultConfig();
+                if(config.InterfaceChat.OtherSettingInterface == null)
+                {
+                    config.InterfaceChat.OtherSettingInterface = new Configuration.Interface.OtherSettingsInterface
+                    {
+                        DropListColorChatUse = false,
+                        DropListColorNickUse = false,
+                        DropListPrefixUse = false,
+                        DropListRankUse = false,
+                    };
+                }
+                if(config.InterfaceChat.InterfacePositions == null)
+                {
+                    config.InterfaceChat.InterfacePositions = new Configuration.Interface.InterfacePosition
+                    {
+                        MainPanels = new Configuration.Interface.InterfacePosition.MainPanel
+                        {
+                            BackgroundAnchorMin = "0.6625 0.1186",
+                            BackgroundAnchorMax = "0.9869678 0.8814",
 
-            foreach (Configuration.ControllerParameters.AdvancedFuncion Permission in Parametres.Where(perm =>
-                         !permission.PermissionExists(perm.Permissions, this)))
-                permission.RegisterPermission(Permission.Permissions, this);
-            
-            foreach (KeyValuePair<String, Int32> sizeMessages in config.ControllerMessages.GeneralSetting.OtherSetting.sizeMessagePrivilages.Where(perm =>
-                         !permission.PermissionExists(perm.Key, this)))
-                permission.RegisterPermission(sizeMessages.Key, this);
-            
-            foreach (KeyValuePair<String, Int32> sizeNick in config.ControllerMessages.GeneralSetting.OtherSetting.sizeNickPrivilages.Where(perm =>
-                         !permission.PermissionExists(perm.Key, this)))
-                permission.RegisterPermission(sizeNick.Key, this);
+                            ContentAnchorMin = "0 0",
+                            ContentAnchorMax = "1 0.8896463",
 
-            if (!permission.PermissionExists(PermissionUseCmdCnick, this))
-                permission.RegisterPermission(PermissionUseCmdCnick, this);      
-            if (!permission.PermissionExists(PermissionUseCmdMsg, this))
-                permission.RegisterPermission(PermissionUseCmdMsg, this);  
-            if (!permission.PermissionExists(PermissionTranslationIgnore, this))
-                permission.RegisterPermission(PermissionTranslationIgnore, this);  
-            if (!permission.PermissionExists(PermissionHideMuteName, this))
-                permission.RegisterPermission(PermissionHideMuteName, this); 
-            if (!permission.PermissionExists(PermissionHideOnline, this))
-                permission.RegisterPermission(PermissionHideOnline, this);
-            if (!permission.PermissionExists(PermissionRename, this))
-                permission.RegisterPermission(PermissionRename, this);
-            if (!permission.PermissionExists(PermissionMute, this))
-                permission.RegisterPermission(PermissionMute, this);
-            if (!permission.PermissionExists(PermissionAlert, this))
-                permission.RegisterPermission(PermissionAlert, this);
-            if (!permission.PermissionExists(PermissionAntiSpam, this))
-                permission.RegisterPermission(PermissionAntiSpam, this);
-            if (!permission.PermissionExists(PermissionHideConnection, this))
-                permission.RegisterPermission(PermissionHideConnection, this);
-            if (!permission.PermissionExists(PermissionHideDisconnection, this))
-                permission.RegisterPermission(PermissionHideDisconnection, this);
-            if (!permission.PermissionExists(PermissionMutedAdmin, this))
-                permission.RegisterPermission(PermissionMutedAdmin, this);
+                            TitleAnchorMin = "0 0.8896463",
+                            TitleAnchorMax = "1 1",
 
+                            CloseButtonAnchorMin = "0.9037238 0.3409882",
+                            CloseButtonAnchorMax = "0.95509 0.6929768",
+
+                            TitleLabelAnchorMin = "0.04494545 0",
+                            TitleLabelAnchorMax = "0.739994 1",
+
+                            InfromationBlock = new Configuration.Interface.InterfacePosition.MainPanel.InfromationBlocks
+                            {
+                                TitleLabelAnchorMin = "0.04152404 0.5224559",
+                                TitleLabelAnchorMax = "0.6196045 0.5934054",
+
+                                MutedLabelAnchorMin = "0.04152404 0.4078422",
+                                MutedLabelAnchorMax = "0.9486688 0.46788",
+
+                                NickPlayerAnchorMin = "0.04152404 0.4610541",
+                                NickPlayerAnchorMax = "0.9486688 0.5210921",
+
+                                IgnoredLabelAnchorMin = "0.04152405 0.3559946",
+                                IgnoredLabelAnchorMax = "0.5168719 0.4160324",
+
+                                IgnoredButtonAnchorMin = "0.443033 0.366909",
+                                IgnoredButtonAnchorMax = "0.9584759 0.4173968",
+                            },
+                            ModerationBlock = new Configuration.Interface.InterfacePosition.MainPanel.ModerationBlocks
+                            {
+                                TitleLabelAnchorMin = "0.04152405 0.2482094",
+                                TitleLabelAnchorMax = "0.9390378 0.3191593",
+
+                                ButtonMuteAnchorMin = "0.04152405 0.1677083",
+                                ButtonMuteAnchorMax = "0.9584759 0.238659",
+
+                                ButtonMuteAllAnchorMin = "0.04152405 0.0913007",
+                                ButtonMuteAllAnchorMax = "0.9584759 0.1622516",
+
+                                ButtonMuteVoiceAllAnchorMin = "0.04152405 0.01489319",
+                                ButtonMuteVoiceAllAnchorMax = "0.9584759 0.08584419",
+                            },
+                            SliderAndDropListBlock = new Configuration.Interface.InterfacePosition.MainPanel.SliderAndDropListBlocks
+                            {
+                                TitleSliderAndDropListRankAnchorMin = "0.04152405 0.761226",
+                                TitleSliderAndDropListRankAnchorMax = "0.4430331 0.8103468",
+
+                                SliderAndDropListRankAnchorMin = "0.4430331 0.7653192",
+                                SliderAndDropListRankAnchorMax = "0.9584759 0.81",
+
+                                TitleSliderAndDropListChatColorAnchorMin = "0.04152405 0.8117096",
+                                TitleSliderAndDropListChatColorAnchorMax = "0.4430331 0.8649233",
+
+                                SliderAndDropListChatColorAnchorMin = "0.4430331 0.8198956",
+                                SliderAndDropListChatColorAnchorMax = "0.9584758 0.8645764",
+
+                                TitleSliderAndDropListNickColorAnchorMin = "0.04152405 0.8717443",
+                                TitleSliderAndDropListNickColorAnchorMax = "0.4430331 0.9194997",
+
+                                SliderAndDropListNickColorAnchorMin = "0.4430331 0.8744721",
+                                SliderAndDropListNickColorAnchorMax = "0.9584758 0.9191527",
+
+                                TitleSliderAndDropListPrefixAnchorMin = "0.04152405 0.9222281",
+                                TitleSliderAndDropListPrefixAnchorMax = "0.4430331 0.9740761",
+
+                                SliderAndDropListPrefixAnchorMin = "0.4430331 0.9290484",
+                                SliderAndDropListPrefixAnchorMax = "0.9584758 0.9737292",
+                            },
+                            SettingBlock = new Configuration.Interface.InterfacePosition.MainPanel.SettingBlocks
+                            {
+                                TitleSettingAnchorMin = "0.04152405 0.6779985",
+                                TitleSettingAnchorMax = "0.6196045 0.7489485",
+
+                                SettingPMLabelAnchorMin = "0.04312925 0.6411574",
+                                SettingPMLabelAnchorMax = "0.4125344 0.6779992",
+
+                                SettingBroadcastAnchorMin = "0.04312925 0.5974963",
+                                SettingBroadcastAnchorMax = "0.4125344 0.6343381",
+
+                                SettingAlertAnchorMin = "0.584079 0.6411574",
+                                SettingAlertAnchorMax = "0.9534805 0.6779992",
+
+                                SettingSoundAnchorMin = "0.584079 0.5974963",
+                                SettingSoundAnchorMax = "0.9534805 0.6343381",
+
+                                BoxSettingPMLabelAnchorMin = "0.38664 0.6425239",
+                                BoxSettingPMLabelAnchorMax = "0.4251647 0.67527",
+
+                                BoxSettingBroadcastAnchorMin = "0.38664 0.5988628",
+                                BoxSettingBroadcastAnchorMax = "0.4251647 0.6316",
+
+                                BoxSettingSoundAnchorMin = "0.5600009 0.5988628",
+                                BoxSettingSoundAnchorMax = "0.5985249 0.6316088",
+
+                                BoxSettingAlertAnchorMin = "0.5600009 0.6425239",
+                                BoxSettingAlertAnchorMax = "0.5985249 0.67527",
+                            },
+                        },
+                        MutePanels = new Configuration.Interface.InterfacePosition.MutePanel
+                        {
+                            BackgroundAnchorMin = "0.0130322 0.1186",
+                            BackgroundAnchorMax = "0.6588541 0.8814",
+                        },
+                        IgnoredPanels = new Configuration.Interface.InterfacePosition.IgnoredPanel
+                        {
+                            BackgroundAnchorMin = "0.0130322 0.1186",
+                            BackgroundAnchorMax = "0.6588541 0.8814"
+                        }
+                    };
+
+                    PrintWarning("Новый конфиг был успешно подтянут с обновлением!");
+                }
+            }
+            catch
+            {
+                PrintWarning("Ошибка #132" + $"чтения конфигурации 'oxide/config/{Name}', создаём новую конфигурацию!!");
+                LoadDefaultConfig();
+            }
+            NextTick(SaveConfig);
+        }
+
+        void RegisteredPermissions()
+        {
+            for (int MsgColor = 0; MsgColor < config.MessageColorList.Count; MsgColor++)
+                if (!permission.PermissionExists(config.MessageColorList[MsgColor].Permissions, this))
+                    permission.RegisterPermission(config.MessageColorList[MsgColor].Permissions, this);
+
+            for (int NickColorList = 0; NickColorList < config.NickColorList.Count; NickColorList++)
+                if (!permission.PermissionExists(config.NickColorList[NickColorList].Permissions, this))
+                    permission.RegisterPermission(config.NickColorList[NickColorList].Permissions, this);
+
+            for (int PrefixList = 0; PrefixList < config.PrefixList.Count; PrefixList++)
+                if (!permission.PermissionExists(config.PrefixList[PrefixList].Permissions, this))
+                    permission.RegisterPermission(config.PrefixList[PrefixList].Permissions, this);
+
+            permission.RegisterPermission(config.RenamePermission, this);
+            permission.RegisterPermission(PermMuteMenu, this);
+            permission.RegisterPermission(config.MessageSetting.PermAdminImmunitetAntispam,this);
             PrintWarning("Permissions - completed");
         }
 
-        [ConsoleCommand("unmute")]
-        void UnMuteCustomAdmin(ConsoleSystem.Arg arg)
-        {
-            if (arg.Player() != null)
-                if (!permission.UserHasPermission(arg.Player().UserIDString, PermissionMute)) return;
-
-            if (arg?.Args == null || arg.Args.Length != 1 || arg.Args.Length > 1)
-            {
-                PrintWarning(LanguageEn ? "Invalid syntax, please use : unmute Steam64ID" : "Неверный синтаксис,используйте : unmute Steam64ID");
-                return;
-            }
-
-            string NameOrID = arg.Args[0];
-            BasePlayer target = GetPlayerNickOrID(NameOrID);
-
-            if (target == null)
-            {
-                UInt64 Steam64ID = 0;
-                if (UInt64.TryParse(NameOrID, out Steam64ID))
-                {
-                    if (UserInformation.ContainsKey(Steam64ID))
-                    {
-                        User Info = UserInformation[Steam64ID];
-                        if (Info == null) return;
-                        if (!Info.MuteInfo.IsMute(MuteType.Chat))
-                        {
-                            ConsoleOrPrintMessage(arg.Player(),
-                                LanguageEn ? "The player does not have a chat lock" : "У игрока нет блокировки чата");
-                            return;
-                        }
-
-                        if (arg.Player()!= null)
-                        {
-                            if (!arg.Player().IsAdmin && arg.Player().userID == Steam64ID)
-                            {
-                                ConsoleOrPrintMessage(arg.Player(),
-                                    LanguageEn
-                                        ? "You can't unlock the chat by yourself"
-                                        : "Вы не можете снять блокировку чата сами с себя");
-
-                                return;
-                            }
-                        }
-
-                        Info.MuteInfo.UnMute(MuteType.Chat);
-
-                        ConsoleOrPrintMessage(arg.Player(),
-                            LanguageEn ? "You have unblocked the offline chat to the player" : "Вы разблокировали чат offline игроку");
-                        return;
-                    }
-                    else
-                    {
-                        ConsoleOrPrintMessage(arg.Player(),
-                            LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                        return;
-                    }
-                }
-                else
-                {
-                    ConsoleOrPrintMessage(arg.Player(),
-                        LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                    return;
-                }
-            }
-
-            UnmutePlayer(target, MuteType.Chat, arg.Player(), false, true);
-            Puts(LanguageEn ? "Successfully" : "Успешно");
-        }
-        
-        
-        private void ReplyTranslationPM(BasePlayer Sender, BasePlayer TargetUser, String Message, String DisplayNameSender, String TargetDisplayName)
-        {
-            if (!String.IsNullOrWhiteSpace(config.ReferenceSetting.translationApiSettings.codeLanguagePrimary))
-            {
-                Action<String> callback = translation =>
-                {
-                    ReplySystem(TargetUser, GetLang("COMMAND_PM_SEND_MSG", TargetUser.UserIDString, DisplayNameSender, !permission.UserHasPermission(TargetUser.UserIDString, PermissionTranslationIgnore) ? translation : Message));
-                    ReplySystem(Sender, GetLang("COMMAND_PM_SUCCESS", Sender.UserIDString, Message, TargetDisplayName));
-                };
-
-                TranslationAPI.Call("Translate", Message, config.ReferenceSetting.translationApiSettings.codeLanguagePrimary, "auto", callback);
-            }
-            else
-            {
-                String codeResult = lang.GetLanguage(TargetUser.UserIDString);
-                saveTranslate.TryAdd(codeResult, new TranslationState());
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                Action<String> callback = translation =>
-                {
-                    saveTranslate[codeResult].IsProcessed = true;
-                    saveTranslate[codeResult].Translation = translation;
-                    saveTranslate[codeResult].DoTranslation = Message;
-
-                    ReplySystem(TargetUser, GetLang("COMMAND_PM_SEND_MSG", TargetUser.UserIDString, DisplayNameSender, !permission.UserHasPermission(TargetUser.UserIDString, PermissionTranslationIgnore) ? translation : Message));
-                    ReplySystem(Sender, GetLang("COMMAND_PM_SUCCESS", Sender.UserIDString, Message, TargetDisplayName));
-                };
-
-                if (lang.GetLanguage(Sender.UserIDString) == codeResult)
-                {
-                    ReplySystem(TargetUser, GetLang("COMMAND_PM_SEND_MSG", TargetUser.UserIDString, DisplayNameSender, Message));
-                    ReplySystem(Sender, GetLang("COMMAND_PM_SUCCESS", Sender.UserIDString, Message, TargetDisplayName));
-                }
-                else if (saveTranslate[codeResult].IsProcessed && !string.IsNullOrWhiteSpace(saveTranslate[codeResult].Translation) && Message == saveTranslate[codeResult].DoTranslation)
-                {
-                    ReplySystem(TargetUser, GetLang("COMMAND_PM_SEND_MSG", TargetUser.UserIDString, DisplayNameSender, saveTranslate[codeResult].Translation));
-                    ReplySystem(Sender, GetLang("COMMAND_PM_SUCCESS", Sender.UserIDString, Message, TargetDisplayName));
-                }
-                else TranslationAPI.Call("Translate", Message, codeResult, "auto", callback);
-            }
-        }
-        private void RenameReset(BasePlayer Renamer)
-        {
-            String apiKey = config.OtherSetting.renameSteamApiKey;
-            if (String.IsNullOrWhiteSpace(apiKey))
-            {
-                ReplySystem(Renamer, LanguageEn ? "You do not have a Steam API Key specified in the configuration - it is impossible to get an up-to-date nickname" : "У вас не указан Steam API Key в конфигурации - невозможно получить актуальный ник");
-                return;
-            }
-            webrequest.Enqueue($"https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key={apiKey}&steamids={Renamer.userID}", null, (code, response) =>
-            {
-			    if(code == 200 && response != null)
-                {
-                    try
-                    {
-                        JObject json = JObject.Parse(response);
-                        JToken players = json["response"]["players"];
-                        if (players is { HasValues: true })
-                        {
-                            String nickname = players[0]["personaname"].ToString();
-                            RenameUpdate(Renamer, nickname);
-                            ReplySystem(Renamer, GetLang("COMMAND_RENAME_RESET_SUCCES", Renamer.UserIDString));
-                        }
-                        else
-                        {
-                            Puts("No player data found for the provided Steam64ID.");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        PrintWarning($"Failed to parse the Steam API response! Error: \"{ex.Message}\"");
-                    }
-                }
-                else
-                {
-                    PrintWarning($"Steam API didn't respond (down?) Code: {code}");
-                }
-            }, this, RequestMethod.GET, null, 5f);
-            
-            ReplySystem(Renamer, GetLang("COMMAND_RENAME_PROCESS_STEAM", Renamer.UserIDString));
-        }
-
-        
-                public void BroadcastAuto()
-        {
-            Configuration.ControllerAlert.Alert Broadcast = config.ControllerAlertSetting.AlertSetting;
-
-            if (Broadcast.AlertMessage)
-            {
-                Int32 IndexBroadkastNow = 0;
-                String RandomMsg = String.Empty;
-
-                timer.Every(Broadcast.MessageListTimer, () =>
-                {
-                    if (Broadcast.AlertMessageType)
-                    {
-                        foreach (BasePlayer p in BasePlayer.activePlayerList)
-                        {
-                            List<String> MessageList = GetMesagesList(p, Broadcast.MessageList.LanguageMessages);
-                            if (MessageList.Count == 0) continue;
-                            
-                            if (IndexBroadkastNow >= MessageList.Count)
-                                IndexBroadkastNow = 0;
-                            RandomMsg = MessageList[IndexBroadkastNow];
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                            ReplySystem(p, RandomMsg);
-                        }
-
-                        IndexBroadkastNow++;
-                    }
-                    else
-                    {
-                        foreach (BasePlayer p in BasePlayer.activePlayerList)
-                        {
-                            String templateText = GetMessages(p, Broadcast.MessageList.LanguageMessages);
-                            if(String.IsNullOrWhiteSpace(templateText)) continue;
-                            ReplySystem(p, templateText);
-                        }
-                    }
-                });
-
-            }
-        }
-        private enum ElementsSettingsType
-        {
-            PM,
-            Broadcast,
-            Alert,
-            Sound
-        }
-        
-        [ChatCommand("cmsg")]
-        private void ColoredMsgSetup(BasePlayer player, String cmd, String[] args)
-        {
-            if (!permission.UserHasPermission(player.UserIDString, PermissionUseCmdMsg)) return;
-            if (player == null)
-                return;
-
-            if (args.Length == 0)
-            {
-                ReplySystem(player, GetLang("COMMAND_COLOR_CUSTOM_NOT_ARG", player.UserIDString));
-                return;
-            }
-
-            String color = String.Join("", args);
-            List<String> correctedColors = Pool.GetList<String>();
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            correctedColors = ConvertStringToList(color);
-            if (HasInvalidHexColor(correctedColors, out String invalidHex))
-            {
-                ReplySystem(player, GetLang("COMMAND_COLOR_CUSTOM_NOT_HEX", player.UserIDString, invalidHex));
-                return;
-            }
-
-            if (correctedColors.Count > 10)
-                ReplySystem(player, GetLang("COMMAND_COLOR_CUSTOM_MAX_ARGUMENTS", player.UserIDString));
-            
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            User User = UserInformation[player.userID];
-            String resultColor = JoinStringList(correctedColors);
-            
-            User.Info.CustomColorMessage = resultColor;
-            
-            Pool.FreeList(ref correctedColors);
-            
-            ReplySystem(player, GetLang("COMMAND_COLOR_CUSTOM_ACCESS", player.UserIDString));
-        }
-        List<String> IQRankListKey(BasePlayer.EncryptedValue<UInt64> userID) => IQRankListKey(userID.Get());
-        String IQRankGetNameRankKey(string Key) => (string)(IQRankSystem?.Call("API_GET_RANK_NAME", Key));
-
-        private void RemoveParametres(String ID, String Permissions)
-        {
-            UInt64 UserID = UInt64.Parse(ID);
-            BasePlayer player = BasePlayer.FindByID(UserID);
-
-            Configuration.ControllerConnection Controller = config.ControllerConnect;
-            Configuration.ControllerParameters Parameters = config.ControllerParameter;
-
-            if (!UserInformation.ContainsKey(UserID)) return;
-            User Info = UserInformation[UserID];
-
-            if (Controller.Turneds.TurnAutoDropPrefix)
-            {
-                if (Parameters.Prefixes.TurnMultiPrefixes)
-                {
-                    foreach (Configuration.ControllerParameters.AdvancedFuncion Prefixes in
-                             Parameters.Prefixes.Prefixes.Where(prefix =>
-                                 Info.Info.PrefixList.Contains(prefix.Argument) && prefix.Permissions == Permissions))
-                    {
-                        Info.Info.PrefixList.Remove(Prefixes.Argument);
-
-                        if (player != null && config.ControllerMessages.GeneralSetting.alertArgumentsInfoRemove)
-                            ReplySystem(player, GetLang("PREFIX_RETURNRED", player.UserIDString, Prefixes.Argument));
-
-                        Log(LanguageEn
-                            ? $"Player ({UserID}) expired prefix {Prefixes.Argument}"
-                            : $"У игрока ({UserID}) истек префикс {Prefixes.Argument}");
-                    }
-                }
-                else
-                {
-                    Configuration.ControllerParameters.AdvancedFuncion Prefixes = Parameters.Prefixes.Prefixes.FirstOrDefault(prefix => prefix.Argument == Info.Info.Prefix && prefix.Permissions == Permissions);
-                    if (Prefixes != null)
-                    {
-                        Info.Info.Prefix = Controller.SetupDefaults.PrefixDefault;
-
-                        if (player != null && config.ControllerMessages.GeneralSetting.alertArgumentsInfoRemove)
-                            ReplySystem(player, GetLang("PREFIX_RETURNRED", player.UserIDString, Prefixes.Argument));
-
-                        Log(LanguageEn
-                            ? $"Player ({UserID}) expired prefix {Prefixes.Argument}"
-                            : $"У игрока ({UserID}) истек префикс {Prefixes.Argument}");
-                    }
-                }
-            }
-            if (Controller.Turneds.TurnAutoDropColorNick)
-            {
-                Configuration.ControllerParameters.AdvancedFuncion ColorNick = Parameters.NickColorList.FirstOrDefault(nick => Info.Info.ColorNick == nick.Argument && nick.Permissions == Permissions);
-                if (ColorNick != null)
-                {
-                    Info.Info.ColorNick = Controller.SetupDefaults.NickDefault;
-                    
-                    if (player != null && config.ControllerMessages.GeneralSetting.alertArgumentsInfoRemove)
-                    {
-                        String nickColorTitle = GetLang("COLOR_NICK_RETURNRED_TITLE", player.UserIDString);
-                        Object resultColorMessage = IsGradientColorValue(Info.Info.ColorNick);
-                        if (resultColorMessage is List<String> gradientColors)
-                            nickColorTitle = ApplyGradientToText(nickColorTitle, gradientColors);
-                        else nickColorTitle = $"<color={Info.Info.ColorNick}>{nickColorTitle}</color>";
-                        
-                        ReplySystem(player, GetLang("COLOR_NICK_RETURNRED", player.UserIDString, nickColorTitle));
-                    }
-
-                    Log(LanguageEn
-                        ? $"Player ({UserID}) expired nick color {ColorNick.Argument}"
-                        : $"У игрока ({UserID}) истек цвет ника {ColorNick.Argument}");
-                }
-            }
-            if (Controller.Turneds.TurnAutoDropColorChat)
-            {
-                Configuration.ControllerParameters.AdvancedFuncion ColorChat = Parameters.MessageColorList.FirstOrDefault(message => Info.Info.ColorMessage == message.Argument && message.Permissions == Permissions);
-                if (ColorChat == null) return;
-                
-                Info.Info.ColorMessage = Controller.SetupDefaults.MessageDefault;
-                
-                if (player != null && config.ControllerMessages.GeneralSetting.alertArgumentsInfoRemove)
-                {
-                    String chatColorTitle = GetLang("COLOR_CHAT_RETURNRED_TITLE", player.UserIDString);
-                    Object resultColorMessage = IsGradientColorValue(Info.Info.ColorMessage);
-                    if (resultColorMessage is List<String> gradientColors)
-                        chatColorTitle = ApplyGradientToText(chatColorTitle, gradientColors);
-                    else chatColorTitle = $"<color={Info.Info.ColorMessage}>{chatColorTitle}</color>";
-                    
-                    ReplySystem(player, GetLang("COLOR_CHAT_RETURNRED", player.UserIDString, chatColorTitle));
-                }
-
-                Log(LanguageEn ? $"Player ({UserID}) chat color expired {ColorChat.Argument}" : $"У игрока ({UserID}) истек цвет чата {ColorChat.Argument}");
-            }
-        }
-        private const String PermissionAlert = "iqchat.alertuse";
-        
-        [ConsoleCommand("rename.reset")]
-        private void ConsoleCommandRenameReset(ConsoleSystem.Arg args)
-        {
-            BasePlayer Renamer = args.Player();
-            if (Renamer == null)
-            {
-                ReplySystem(Renamer, LanguageEn ? "You can only use this command while on the server" : "Вы можете использовать эту команду только находясь на сервере");
-                return;
-            }
-            
-            if (!permission.UserHasPermission(Renamer.UserIDString, PermissionRename)) return;
-            GeneralInformation General = GeneralInfo;
-            if (General == null) return;
-
-            if (!General.RenameList.ContainsKey(Renamer.userID))
-            {
-                ReplySystem(Renamer, GetLang("COMMAND_RENAME_NOTHING", Renamer.UserIDString));
-                return;
-            }
-            General.RenameList.Remove(Renamer.userID);
-            RenameReset(Renamer);
-        }
-
-        String API_GET_CHAT_COLOR(BasePlayer.EncryptedValue<UInt64> ID) => API_GET_CHAT_COLOR(ID.Get());
-        private List<String> ConvertStringToList(String input)
-        {
-            String pattern = @"[,\.\;\:\s]+";
-        
-            return Regex.Split(input, pattern) 
-                .Select(item => item.Trim()) 
-                .Where(item => !string.IsNullOrEmpty(item))
-                .Take(10)
-                .ToList();
-        }
-
-        private const String PermissionUseCmdCnick = "iqchat.cnick";
-        private void DrawUI_IQChat_OpenDropListArgument(BasePlayer player, Int32 Count)
-        {
-            String Interface = InterfaceBuilder.GetInterface("UI_Chat_OpenDropListArgument_Taked");
-            if (Interface == null) return;
-
-            Interface = Interface.Replace("%COUNT%", Count.ToString());
-
-            CuiHelper.DestroyUi(player, $"TAKED_INFO_{Count}");
-            CuiHelper.AddUi(player, Interface);
-        }
-        
-        [ConsoleCommand("unmutevoice")]
-        void UnMuteVoiceCustomAdmin(ConsoleSystem.Arg arg)
-        {
-            if (arg.Player() != null)
-                if (!permission.UserHasPermission(arg.Player().UserIDString, PermissionMute)) return;
-
-            if (arg?.Args == null || arg.Args.Length != 1 || arg.Args.Length > 1)
-            {
-                PrintWarning(LanguageEn ? "Invalid syntax, please use : unmutevoice Steam64ID" : "Неверный синтаксис,используйте : unmutevoice Steam64ID");
-                return;
-            }
-
-            string NameOrID = arg.Args[0];
-            BasePlayer target = GetPlayerNickOrID(NameOrID);
-
-            if (target == null)
-            {
-                UInt64 Steam64ID = 0;
-                if (UInt64.TryParse(NameOrID, out Steam64ID))
-                {
-                    if (UserInformation.ContainsKey(Steam64ID))
-                    {
-                        User Info = UserInformation[Steam64ID];
-                        if (Info == null) return;
-                        if (!Info.MuteInfo.IsMute(MuteType.Voice))
-                        {
-                            ConsoleOrPrintMessage(arg.Player(),
-                                LanguageEn ? "The player does not have a chat lock" : "У игрока нет блокировки чата");
-                            return;
-                        }
-                        
-                        if (arg.Player()!= null)
-                        {
-                            if (!arg.Player().IsAdmin && arg.Player().userID == Steam64ID)
-                            {
-                                ConsoleOrPrintMessage(arg.Player(),
-                                    LanguageEn
-                                        ? "You can't unlock the chat by yourself"
-                                        : "Вы не можете снять блокировку чата сами с себя");
-
-                                return;
-                            }
-                        }
-                        
-                        Info.MuteInfo.UnMute(MuteType.Voice);
-
-                        ConsoleOrPrintMessage(arg.Player(),
-                            LanguageEn ? "You have unblocked the offline chat to the player" : "Вы разблокировали чат offline игроку");
-                        return;
-                    }
-                    else
-                    {
-                        ConsoleOrPrintMessage(arg.Player(),
-                            LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                        return;
-                    }
-                }
-                else
-                {
-                    ConsoleOrPrintMessage(arg.Player(),
-                        LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                    return;
-                }
-            }
-
-            UnmutePlayer(target, MuteType.Voice, arg.Player(), false, true);
-            Puts(LanguageEn ? "Successfully" : "Успешно");
-        }
-        private BasePlayer GetPlayerNickOrID(String Info)
-        {
-            String NameOrID = String.Empty;
-
-            KeyValuePair<UInt64, GeneralInformation.RenameInfo> RenameInformation = GeneralInfo.RenameList.FirstOrDefault(x => x.Value.RenameNick.Contains(Info) || x.Value.RenameID.ToString() == Info);
-            if (RenameInformation.Value == null)
-                NameOrID = Info;
-            else NameOrID = RenameInformation.Key.ToString();
-
-            foreach (BasePlayer Finder in BasePlayer.activePlayerList)
-            {
-                if (Finder.displayName.ToLower().Contains(NameOrID.ToLower()) || Finder.userID.ToString() == NameOrID)
-                    return Finder;
-            }
-
-            return null;
-        }
-        String IQRankGetTimeGame(BasePlayer.EncryptedValue<UInt64> userID) => IQRankGetTimeGame(userID.Get());
-        private const String PermissionHideDisconnection = "iqchat.hidedisconnection";
-        
-        private Tuple<String, Boolean> BadWordsCleaner(String formattingMessage, String replaceBadWord, Dictionary<String, Boolean> badWords)
-        {
-            String resultMessage = formattingMessage;
-            Boolean isBadWords = false;
-
-            foreach (KeyValuePair<String, Boolean> word in badWords.Where(x => !x.Key.Contains("*")))
-            {
-                if (word.Value)
-                {
-                    String pattern = Regex.Escape(word.Key);
-                    resultMessage = Regex.Replace(resultMessage, pattern, replaceBadWord, RegexOptions.IgnoreCase);
-                    if (Regex.IsMatch(formattingMessage, pattern, RegexOptions.IgnoreCase))
-                        isBadWords = true;
-                }
-                else
-                {
-                    String pattern = $@"\b{Regex.Escape(word.Key)}\b";
-                    resultMessage = Regex.Replace(resultMessage, pattern, replaceBadWord);
-                    if (Regex.IsMatch(formattingMessage, pattern))
-                        isBadWords = true;
-                }
-            }
-
-            return Tuple.Create(resultMessage, isBadWords);
-        }
-
-        void ReadData()
-        {
-            if (!Oxide.Core.Interface.Oxide.DataFileSystem.ExistsDatafile("IQSystem/IQChat/Users") && Oxide.Core.Interface.Oxide.DataFileSystem.ExistsDatafile("IQChat/Users"))
-            {
-                GeneralInfo = Oxide.Core.Interface.Oxide.DataFileSystem.ReadObject<GeneralInformation>("IQChat/Information");
-                UserInformation = Oxide.Core.Interface.Oxide.DataFileSystem.ReadObject<Dictionary<UInt64, User>>("IQChat/Users");
-
-                Oxide.Core.Interface.Oxide.DataFileSystem.WriteObject("IQSystem/IQChat/Information", GeneralInfo);
-                Oxide.Core.Interface.Oxide.DataFileSystem.WriteObject("IQSystem/IQChat/Users", UserInformation);
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                PrintWarning(LanguageEn ? "Your player data has been moved to a new directory - IQSystem/IQChat , you can delete old data files!" : "Ваши данные игроков были перенесены в новую директорию - IQSystem/IQChat , вы можете удалить старые дата-файлы!");
-            }
-
-            GeneralInfo = Oxide.Core.Interface.Oxide.DataFileSystem.ReadObject<GeneralInformation>("IQSystem/IQChat/Information");
-            UserInformation = Oxide.Core.Interface.Oxide.DataFileSystem.ReadObject<Dictionary<UInt64, User>>("IQSystem/IQChat/Users");
-            UserInformationConnection = Oxide.Core.Interface.Oxide.DataFileSystem.ReadObject<Dictionary<UInt64, AntiNoob>>("IQSystem/IQChat/AntiNoob");
-        }
-        private List<String> GetPlayersOnline()
-        {
-            List<String> PlayerNames = new List<String>();
-            Int32 Count = 1;
-
-            if (IsReadyIQFakeActive())
-            {
-                List<FakePlayer> fakePlayerList = GetCombinedPlayerList();
-                if (fakePlayerList != null)
-                {
-                    String prefix = API_GET_DEFAULT_PREFIX();
-                    String colorNick = API_GET_DEFAULT_NICK_COLOR();
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                    foreach (FakePlayer combinedPlayer in fakePlayerList)
-                    {
-                        String resultName = IsFakeUser(combinedPlayer.userId)
-                            ? $"{Count} - {prefix}<color={colorNick}>{combinedPlayer.displayName}</color>"
-                            : $"{Count} - {GetPlayerFormat(combinedPlayer.displayName, combinedPlayer.userId)}";
-                        PlayerNames.Add(resultName);
-
-                        Count++;
-                    }
-
-                    return PlayerNames;
-                }
-            }
-            
-            foreach (BasePlayer playerInList in BasePlayer.activePlayerList.Where(p => !permission.UserHasPermission(p.UserIDString, PermissionHideOnline)))
-            {
-                PlayerNames.Add($"{Count} - {GetPlayerFormat(playerInList.displayName, playerInList.UserIDString)}");
-                Count++;
-            }
-            
-            return PlayerNames;
-        }
-
-        void ReplyBroadcast(String Message, String CustomPrefix = null, String CustomAvatar = null, Boolean AdminAlert = false)
-        {
-            foreach (BasePlayer p in !AdminAlert ? BasePlayer.activePlayerList.Where(p => UserInformation[p.userID].Settings.TurnBroadcast) : BasePlayer.activePlayerList)
-                ReplySystem(p, Message, CustomPrefix, CustomAvatar);
-        }
-        
-        
-        [ChatCommand("chat")]
-        private void ChatCommandOpenedUI(BasePlayer player)
-        {
-            if (_interface == null)
-            {
-                PrintWarning(LanguageEn ? "We generate the interface, wait for a message about successful generation" : "Генерируем интерфейс, ожидайте сообщения об успешной генерации");
-                return;
-            }
-            if (player == null) return;
-
-            Configuration.ControllerParameters ControllerParameters = config.ControllerParameter;
-
-            if (!LocalBase.ContainsKey(player))
-                LocalBase.Add(player, new InformationOpenedUI { });
-
-            LocalBase[player].ElementsPrefix = ControllerParameters.Prefixes.Prefixes.OrderByDescending(arg => arg.Argument.Length).Where(p => permission.UserHasPermission(player.UserIDString, p.Permissions) && !p.IsBlockSelected).ToList();
-            LocalBase[player].ElementsNick = ControllerParameters.NickColorList.Where(n => permission.UserHasPermission(player.UserIDString, n.Permissions) && !n.IsBlockSelected).ToList();
-            LocalBase[player].ElementsChat = ControllerParameters.MessageColorList.Where(m => permission.UserHasPermission(player.UserIDString, m.Permissions) && !m.IsBlockSelected).ToList();
-
-            if (IQRankSystem && config.ReferenceSetting.IQRankSystems.UseRankSystem)
-            {
-                List<Configuration.ControllerParameters.AdvancedFuncion> RankList = new List<Configuration.ControllerParameters.AdvancedFuncion>();
-                foreach (String Rank in IQRankListKey(player.userID))
-                    RankList.Add(new Configuration.ControllerParameters.AdvancedFuncion { Argument = Rank, Permissions = String.Empty });
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                LocalBase[player].ElementsRanks = RankList;
-            }
-
-            DrawUI_IQChat_Context(player);
-        }
-
-        
-                private void DrawUI_IQChat_DropList(BasePlayer player, String OffsetMin, String OffsetMax, String Title, TakeElementUser ElementType)
-        {
-            String Interface = InterfaceBuilder.GetInterface("UI_Chat_DropList");
-            if (Interface == null) return;
-
-            Interface = Interface.Replace("%TITLE%", Title);
-            Interface = Interface.Replace("%OFFSET_MIN%", OffsetMin);
-            Interface = Interface.Replace("%OFFSET_MAX%", OffsetMax);
-            Interface = Interface.Replace("%BUTTON_DROP_LIST_CMD%", $"newui.cmd droplist.controller open {ElementType}");
-
-            CuiHelper.AddUi(player, Interface);
-        }
-        [ChatCommand("saybro")]
-        private void AlertOnlyPlayerChatCommand(BasePlayer Sender, String cmd, String[] args)
-        {
-            if (!permission.UserHasPermission(Sender.UserIDString, PermissionAlert)) return;
-            if (args == null || args.Length == 0)
-            {
-                ReplySystem(Sender, LanguageEn ? "You didn't specify a player!" : "Вы не указали игрока!");
-                return;
-            }
-            BasePlayer Recipient = BasePlayer.Find(args[0]);
-            if (Recipient == null)
-            {
-                ReplySystem(Sender, LanguageEn ? "The player is not on the server" : "Игрока нет на сервере!");
-                return;
-            }
-            Alert(Sender, Recipient, args.Skip(1).ToArray());
-        }
-        
-        
-        object OnPlayerVoice(BasePlayer player, Byte[] data)
-        {
-            if (UserInformation[player.userID].MuteInfo.IsMute(MuteType.Voice))
-                return false;
-            return null;
-        }
-        public enum MuteType
-        {
-            Chat,
-            Voice
-        }
-                
-        
-        private static Configuration config = new Configuration();
-        void API_ALERT(String Message, Chat.ChatChannel channel = Chat.ChatChannel.Global, String CustomPrefix = null, String CustomAvatar = null, String CustomHex = null)
-        {
-            foreach (BasePlayer p in BasePlayer.activePlayerList)
-                ReplySystem(p, Message, CustomPrefix, CustomAvatar, CustomHex);
-        }
+        protected override void LoadDefaultConfig() => config = Configuration.GetNewConfiguration();
         protected override void SaveConfig() => Config.WriteObject(config);
 
-        String API_GET_NICK_COLOR(BasePlayer.EncryptedValue<UInt64> ID) => API_GET_NICK_COLOR(ID.Get());
-        private enum TakeElementUser
+        #endregion
+
+        #region Data
+        [JsonProperty("Дата с настройкой чата игрока")]
+        public Dictionary<ulong, SettingUser> ChatSettingUser = new Dictionary<ulong, SettingUser>();
+        [JsonProperty("Дата с Административной настройкой")] public AdminSettings AdminSetting = new AdminSettings();
+        public class SettingUser
         {
-            Prefix,
-            Nick,
-            Chat,
-            Rank,
-            MultiPrefix
-        }
-        private enum SelectedAction
-        {
-            Mute,
-            Ignore
-        }
-
-        private void DrawUI_IQChat_OpenDropListArgument(BasePlayer player, TakeElementUser ElementType, Configuration.ControllerParameters.AdvancedFuncion Info, Int32 X, Int32 Y, Int32 Count)
-        {
-            String Interface = InterfaceBuilder.GetInterface("UI_Chat_OpenDropListArgument");
-            if (Interface == null) return;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            String DisplayName = player.displayName;
-            if (ElementType == TakeElementUser.Nick)
-            {
-                String ColorNickPlayer = Info.Argument;
-                Object resultColorNick = IsGradientColorValue(ColorNickPlayer);
-                if (resultColorNick is List<String> gradientColors)
-                    DisplayName = ApplyGradientToText(DisplayName, gradientColors);
-                else DisplayName = $"<color={ColorNickPlayer}>{DisplayName}</color>";
-            }
-
-            String ChatMessage = GetLang("IQCHAT_CONTEXT_NICK_DISPLAY_MESSAGE", player.UserIDString);
-            if (ElementType == TakeElementUser.Chat)
-            {
-                String ColorChat = Info.Argument;
-                Object resultColorChat = IsGradientColorValue(ColorChat);
-                if (resultColorChat is List<String> gradientChatColors)
-                    ChatMessage = ApplyGradientToText(ChatMessage, gradientChatColors);
-                else ChatMessage = $"<color={ColorChat}>{ChatMessage}</color>";
-            }
-
-            String Argument = ElementType == TakeElementUser.MultiPrefix || ElementType == TakeElementUser.Prefix ? Info.Argument :
-                    ElementType == TakeElementUser.Nick ? DisplayName :
-                    ElementType == TakeElementUser.Chat ? ChatMessage :
-                    ElementType == TakeElementUser.Rank ? IQRankGetNameRankKey(Info.Argument) : String.Empty;
-
-            Interface = Interface.Replace("%OFFSET_MIN%", $"{-140.329 - (-103 * X)} {-2.243 + (Y * -28)}");
-            Interface = Interface.Replace("%OFFSET_MAX%", $"{-65.271 - (-103 * X)} {22.568 + (Y * -28)}");
-            Interface = Interface.Replace("%COUNT%", Count.ToString());
-            Interface = Interface.Replace("%ARGUMENT%", Argument);
-            Interface = Interface.Replace("%TAKE_COMMAND_ARGUMENT%", $"newui.cmd droplist.controller element.take {ElementType} {Count} {Info.Permissions} {Info.Argument}");
-
-            CuiHelper.DestroyUi(player, $"ArgumentDropList_{Count}");
-            CuiHelper.AddUi(player, Interface);
-        }
-		   		 		  						  	   		  		 			  		  		  			 		   			
-        
-        
-        [ConsoleCommand("mutefull")]
-        void MuteCustomAdminFull(ConsoleSystem.Arg arg)
-        {
-            if (arg.Player() != null)
-                if (!permission.UserHasPermission(arg.Player().UserIDString, PermissionMute)) return;
-            if (arg == null || arg.Args == null || arg.Args.Length != 3 || arg.Args.Length > 3)
-            {
-                PrintWarning(LanguageEn ? "Invalid syntax, use : mutefull Steam64ID/Nick Reason Time(seconds)" : "Неверный синтаксис,используйте : mutefull Steam64ID/Ник Причина Время(секунды)");
-                return;
-            }
-            string NameOrID = arg.Args[0];
-            string Reason = arg.Args[1];
-            Int32 TimeMute = 0;
-            if (!Int32.TryParse(arg.Args[2], out TimeMute))
-            {
-                PrintWarning(LanguageEn ? "Enter time in numbers!" : "Введите время цифрами!");
-                return;
-            }
-            
-            BasePlayer target = GetPlayerNickOrID(NameOrID);
-            if (target == null)
-            {
-                UInt64 Steam64ID = 0;
-                if (UInt64.TryParse(NameOrID, out Steam64ID))
-                {
-                    if (UserInformation.ContainsKey(Steam64ID))
-                    {
-                        User Info = UserInformation[Steam64ID];
-                        if (Info == null) return;
-                        
-                        Info.MuteInfo.SetMute(MuteType.Chat, TimeMute);
-                        Info.MuteInfo.SetMute(MuteType.Voice, TimeMute);
-                        PrintWarning(LanguageEn ? "Chat and voice blocking issued to offline player" : "Блокировка чата и голоса выдана offline-игроку");
-                        return;
-                    }
-                    else
-                    {
-                        PrintWarning(LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                        return;
-                    }
-                }
-                else
-                {
-                    PrintWarning(LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                    return;
-                }
-            }
-
-            MutePlayer(target, MuteType.Chat, 0, arg.Player(), Reason, TimeMute, true, true);
-            MutePlayer(target, MuteType.Voice, 0, arg.Player(), Reason, TimeMute, true, true);
-            Puts(LanguageEn ? "Successfully" : "Успешно");
-        }
-        
-                private void DrawUI_IQChat_Update_Check_Box(BasePlayer player, ElementsSettingsType Type, String OffsetMin, String OffsetMax, Boolean StatusCheckBox)
-        {
-            String Interface = InterfaceBuilder.GetInterface("UI_Chat_Context_CheckBox");
-            User Info = UserInformation[player.userID];
-            if (Info == null || Interface == null) return;
-
-            String Name = $"{Type}";
-            Interface = Interface.Replace("%NAME_CHECK_BOX%", Name);
-            Interface = Interface.Replace("%COLOR%", !StatusCheckBox ? "0.4716981 0.4716981 0.4716981 1" : "0.6040971 0.4198113 1 1");
-            Interface = Interface.Replace("%OFFSET_MIN%", OffsetMin);
-            Interface = Interface.Replace("%OFFSET_MAX%", OffsetMax);
-            Interface = Interface.Replace("%COMMAND_TURNED%", $"newui.cmd checkbox.controller {Type}");
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            CuiHelper.DestroyUi(player, Name);
-            CuiHelper.AddUi(player, Interface);
-        }
-        private void DiscordLoggChat(BasePlayer player, Chat.ChatChannel Channel, String MessageLogged)
-        {
-            List<Fields> fields = new List<Fields>
-                        {
-                            new Fields(LanguageEn ? "Nick" : "Ник", player.displayName, true),
-                            new Fields("Steam64ID", player.UserIDString, true),
-                            new Fields(LanguageEn ? "Channel" : "Канал", Channel == Chat.ChatChannel.Global ? (LanguageEn ? "Global" : "Глобальный чат") : Channel == Chat.ChatChannel.Local ? (LanguageEn ? "Local" : "Локальный чат") : Channel == Chat.ChatChannel.Cards ? (LanguageEn ? "Poker" : "Покерный чат") : (LanguageEn ? "Team" : "Командный чат"), true),
-                            new Fields(LanguageEn ? "Message" : "Сообщение", MessageLogged, false),
-                        };
-
-            FancyMessage newMessage = new FancyMessage(null, false, new FancyMessage.Embeds[1] { new FancyMessage.Embeds(null, 10710525, fields, new Authors("IQChat Chat-History", null, "https://i.postimg.cc/SshGgy52/xiwsg5m.png", null), null) });
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            switch (Channel)
-            {
-                case Chat.ChatChannel.Cards:
-                case Chat.ChatChannel.Global:
-                case Chat.ChatChannel.Local:
-                    {
-                        Configuration.OtherSettings.General GlobalChat = config.OtherSetting.LogsChat.GlobalChatSettings;
-                        if (!GlobalChat.UseLogged || String.IsNullOrWhiteSpace(GlobalChat.Webhooks)) return;
-                        Request($"{GlobalChat.Webhooks}", newMessage.toJSON());
-                        break;
-                    }
-                case Chat.ChatChannel.Team:
-                    {
-                        Configuration.OtherSettings.General TeamChat = config.OtherSetting.LogsChat.TeamChatSettings;
-                        if (!TeamChat.UseLogged || String.IsNullOrWhiteSpace(TeamChat.Webhooks)) return;
-                        Request($"{TeamChat.Webhooks}", newMessage.toJSON());
-                    }
-                    break;
-                default:
-                    break;
-            }
+            public string ChatPrefix;
+            public List<string> MultiPrefix = new List<string>();
+            public string NickColor;
+            public string MessageColor;
+            public double MuteChatTime;
+            public double MuteVoiceTime;
+            public bool PMTurn;
+            public bool AlertTurn;
+            public bool BroadcastTurn;
+            public bool SoundTurn;
+            public bool GlobalChatTurn;
+            public List<ulong> IgnoredUsers = new List<ulong>();
         }
 
-        private void UnmutePlayer(BasePlayer Target, MuteType Type, BasePlayer Moderator = null, Boolean HideUnmute = false, Boolean Command = false, String fakeUserId = "")
+        public class AdminSettings
         {
-            if (IsReadyIQFakeActive() && !String.IsNullOrWhiteSpace(fakeUserId))
-            {
-                if (Moderator != null)
-                {
-                    String fakeName = GetFakeName(fakeUserId);
-                    ReplyBroadcast(null, null, false, Type == MuteType.Chat ? "FUNC_MESSAGE_UNMUTE_CHAT" : "FUNC_MESSAGE_UNMUTE_VOICE", Moderator.displayName, fakeName);
-                }
-
-                SetMuteFakeUser(fakeUserId, false);
-                return;
-            }
-            
-            if (!UserInformation.ContainsKey(Target.userID)) return;
-            User Info = UserInformation[Target.userID];
-
-            GeneralInformation.RenameInfo TargetRename = GeneralInfo.GetInfoRename(Target.userID);
-            GeneralInformation.RenameInfo ModeratorRename = Moderator != null ? GeneralInfo.GetInfoRename(Moderator.userID) : null;
-            if (!Info.MuteInfo.IsMute(Type))
-            {
-                if (Moderator != null)
-                    ReplySystem(Moderator, LanguageEn ? "The player is not banned" : "У игрока нет блокировки");
-                else Puts(LanguageEn ? "The player is not banned!" : "У игрока нет блокировки!");
-                return;
-            }
-
-            String TargetName = TargetRename != null ? $"{TargetRename.RenameNick ?? Target.displayName}" : Target.displayName;
-            String NameModerator = Moderator == null ? GetLang("IQCHAT_FUNCED_ALERT_TITLE_SERVER", Target.UserIDString) : permission.UserHasPermission(Moderator.UserIDString, PermissionHideMuteName) ? GetLang("IQCHAT_FUNCED_ALERT_TITLE_SERVER", Target.UserIDString) : ModeratorRename != null ? $"{ModeratorRename.RenameNick ?? Moderator.displayName}" : Moderator.displayName;
-            String LangMessage = Type == MuteType.Chat ? "FUNC_MESSAGE_UNMUTE_CHAT" : "FUNC_MESSAGE_UNMUTE_VOICE";
-
-            if (!HideUnmute)
-            {
-                if (Moderator != null)
-                    if (!Moderator.IsAdmin && Moderator.userID == Target.userID)
-                    {
-                        ReplySystem(Moderator, GetLang("FUNC_MESSAGE_UNMUTE_YOURSELF", Moderator.UserIDString));
-                        return;
-                    }
-
-                ReplyBroadcast(null, null, false, LangMessage, NameModerator, TargetName);
-            }
-            else
-            {
-                if (Target != null)
-                    ReplySystem(Target, GetLang(LangMessage, Target.UserIDString, NameModerator, TargetName));
-                if (Moderator != null)
-                {
-                    if (!Moderator.IsAdmin && Moderator.userID == Target.userID)
-                    {
-                        ReplySystem(Moderator, GetLang("FUNC_MESSAGE_UNMUTE_YOURSELF", Moderator.UserIDString));
-                        return;
-                    }
-
-                    ReplySystem(Moderator, GetLang(LangMessage, Moderator.UserIDString, NameModerator, TargetName));
-                }
-            }
-
-            Info.MuteInfo.UnMute(Type);
-            
-            if (Moderator != null && Moderator != Target)
-                Interface.Oxide.CallHook("OnPlayerUnMuted", Target, Moderator);
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            DiscordLoggMuted(Target, Type, Moderator: Moderator);
+            public bool MuteChatAll;
+            public bool MuteVoiceAll;
+            public Dictionary<ulong, string> RenameList = new Dictionary<ulong, string>()
+;        }
+        void ReadData()
+        {
+            ChatSettingUser = Oxide.Core.Interface.Oxide.DataFileSystem.ReadObject<Dictionary<ulong, SettingUser>>("IQChat/IQUser");
+            AdminSetting = Oxide.Core.Interface.Oxide.DataFileSystem.ReadObject<AdminSettings>("IQChat/AdminSetting");
         }
-        private String[] GetInfoSkillTree(BasePlayer player)
+        void WriteData()
         {
-            if (!SkillTree || !config.ReferenceSetting.skillTreeSettings.UseSkillTree) return null;
-            return (String[])SkillTree.Call("ST_GetPlayerLevel", player);
+            Oxide.Core.Interface.Oxide.DataFileSystem.WriteObject("IQChat/IQUser", ChatSettingUser);
+            Oxide.Core.Interface.Oxide.DataFileSystem.WriteObject("IQChat/AdminSetting", AdminSetting);
         }
 
-        [ChatCommand("r")]
-        void RChat(BasePlayer Sender, string cmd, string[] arg)
+        void RegisteredDataUser(BasePlayer player)
         {
-            Configuration.ControllerMessage ControllerMessages = config.ControllerMessages;
-            if (!ControllerMessages.TurnedFunc.PMSetting.PMActivate) return;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            if (arg.Length == 0 || arg == null)
-            {
-                ReplySystem(Sender, GetLang("COMMAND_R_NOTARG", Sender.UserIDString));
-                return;
-            }
-
-            Configuration.ControllerMessage.TurnedFuncional.AntiNoob.Settings antiNoob = config.ControllerMessages.TurnedFunc.AntiNoobSetting.AntiNoobPM;
-            if (antiNoob.AntiNoobActivate)
-                if (IsNoob(Sender.userID, antiNoob.TimeBlocked))
+            if (!ChatSettingUser.ContainsKey(player.userID))
+                ChatSettingUser.Add(player.userID, new SettingUser
                 {
-                    ReplySystem(Sender, GetLang("IQCHAT_INFO_ANTI_NOOB_PM", Sender.UserIDString, FormatTime(UserInformationConnection[Sender.userID].LeftTime(antiNoob.TimeBlocked), Sender.UserIDString)));
-                    return;
-                }
-
-            if (!PMHistory.ContainsKey(Sender))
-            {
-                ReplySystem(Sender, GetLang("COMMAND_R_NOTMSG", Sender.UserIDString));
-                return;
-            }
-
-            BasePlayer RetargetUser = PMHistory[Sender];
-            if (RetargetUser == null)
-            {
-                ReplySystem(Sender, GetLang("COMMAND_PM_NOT_USER", Sender.UserIDString));
-                return;
-            }
-
-            User InfoRetarget = UserInformation[RetargetUser.userID];
-            User InfoSender = UserInformation[RetargetUser.userID];
-
-            if(config.ControllerMutes.mutedPM)
-                if (InfoSender.MuteInfo.IsMute(MuteType.Chat))
-                {
-                    ReplySystem(Sender, GetLang("IQCHAT_FUNCED_NO_SEND_CHAT_MUTED", Sender.UserIDString, FormatTime(InfoSender.MuteInfo.GetTime(MuteType.Chat), Sender.UserIDString)));
-                    return;
-                }
-
-            if (!InfoRetarget.Settings.TurnPM)
-            {
-                ReplySystem(Sender, GetLang("FUNC_MESSAGE_PM_TURN_FALSE", Sender.UserIDString));
-                return;
-            }
-            if (ControllerMessages.TurnedFunc.IgnoreUsePM)
-            {
-                if (InfoRetarget.Settings.IsIgnored(Sender.userID))
-                {
-                    ReplySystem(Sender, GetLang("IGNORE_NO_PM", Sender.UserIDString));
-                    return;
-                }
-                if (InfoSender.Settings.IsIgnored(RetargetUser.userID))
-                {
-                    ReplySystem(Sender, GetLang("IGNORE_NO_PM_ME", Sender.UserIDString));
-                    return;
-                }
-            }
-
-            String Message = GetMessageInArgs(Sender, arg);
-            if (Message == null || Message.Length <= 0)
-            {
-                ReplySystem(Sender, GetLang("COMMAND_PM_NOT_NULL_MSG", Sender.UserIDString));
-                return;
-            }
-            if (Message.Length > 125) return;
-            Message = Message.EscapeRichText();
-
-            PMHistory[RetargetUser] = Sender;
-
-            GeneralInformation.RenameInfo RenameSender = GeneralInfo.GetInfoRename(Sender.userID);
-            GeneralInformation.RenameInfo RenamerTarget = GeneralInfo.GetInfoRename(RetargetUser.userID);
-            String DisplayNameSender = RenameSender != null ? RenameSender.RenameNick ?? Sender.displayName : Sender.displayName;
-            String TargetDisplayName = RenamerTarget != null ? RenamerTarget.RenameNick ?? RetargetUser.displayName : RetargetUser.displayName;
-
-            if (TranslationAPI && config.ReferenceSetting.translationApiSettings.useTranslationApi && config.ReferenceSetting.translationApiSettings.translatePmChat)
-                ReplyTranslationPM(Sender, RetargetUser, Message, DisplayNameSender, TargetDisplayName);
-            else
-            {
-                ReplySystem(RetargetUser, GetLang("COMMAND_PM_SEND_MSG", RetargetUser.UserIDString, DisplayNameSender, Message));
-                ReplySystem(Sender, GetLang("COMMAND_PM_SUCCESS", Sender.UserIDString, Message, TargetDisplayName));
-            }
-            
-            if (InfoRetarget.Settings.TurnSound)
-                Effect.server.Run(ControllerMessages.TurnedFunc.PMSetting.SoundPM, RetargetUser.GetNetworkPosition());
-
-            RustApp?.Call("RA_DirectMessageHandler", Sender.UserIDString, RetargetUser.UserIDString, Message);
-            
-            Log(LanguageEn ? $"PRIVATE MESSAGES : {DisplayNameSender}({Sender.userID}) sent a message to the player - {TargetDisplayName}({RetargetUser.userID})\nMESSAGE : {Message}" : $"ЛИЧНЫЕ СООБЩЕНИЯ : {DisplayNameSender}({Sender.userID}) отправил сообщение игроку - {TargetDisplayName}({RetargetUser.userID})\nСООБЩЕНИЕ : {Message}");
-            DiscordLoggPM(Sender, RetargetUser, Message);
-
-            RCon.Broadcast(RCon.LogType.Chat, new Chat.ChatEntry
-            {
-                Message = LanguageEn ? $"PRIVATE MESSAGES : {DisplayNameSender}({Sender.userID}) -> {TargetDisplayName}({RetargetUser.userID}) : MESSAGE : {Message}" : $"ЛИЧНЫЕ СООБЩЕНИЯ : {DisplayNameSender}({Sender.userID}) -> {TargetDisplayName}({RetargetUser.userID}) : СООБЩЕНИЕ : {Message}",
-                UserId = Sender.UserIDString,
-                Username = Sender.displayName,
-                Channel = Chat.ChatChannel.Global,
-                Time = (DateTime.UtcNow.Hour * 3600) + (DateTime.UtcNow.Minute * 60),
-                Color = "#3f4bb8",
-            });
-            PrintWarning(LanguageEn ? $"PRIVATE MESSAGES : {DisplayNameSender}({Sender.userID}) -> {TargetDisplayName}({RetargetUser.userID}) : MESSAGE : {Message}" : $"ЛИЧНЫЕ СООБЩЕНИЯ : {DisplayNameSender}({Sender.userID}) -> {TargetDisplayName}({RetargetUser.userID}) : СООБЩЕНИЕ : {Message}");
-        }
-        
-        
-        
-        
-        public List<String> GetMesagesList(BasePlayer player, Dictionary<String, List<String>> LanguageMessages)
-        {
-            String LangPlayer = _.lang.GetLanguage(player.UserIDString);
-
-            if (LanguageMessages.ContainsKey(LangPlayer))
-                return LanguageMessages[LangPlayer];
-            else if (LanguageMessages.ContainsKey("en"))
-                return LanguageMessages["en"];
-            else return LanguageMessages.FirstOrDefault().Value;
-        }
-        
-        
-                [ConsoleCommand("newui.cmd")]
-        private void ConsoleCommandFuncional(ConsoleSystem.Arg arg)
-        {
-            BasePlayer player = arg.Player();
-            if (player == null) return;
-            String Action = arg.Args[0];
-            if (Action == null || String.IsNullOrWhiteSpace(Action)) return;
-
-            if (!LocalBase.ContainsKey(player))
-            {
-                PrintError(LanguageEn ? "UI was unable to process the local base (Local Base) contact the developer" : "UI не смог обработать локальную базу (LocalBase) свяжитесь с разработчиком");
-                return;
-            }
-            Configuration.ControllerParameters ControllerParameters = config.ControllerParameter;
-            if (ControllerParameters == null)
-            {
-                PrintError(LanguageEn ? "An error has been made in the configuration! Controller Parameters is null, contact developer" : "В конфигурации допущена ошибка! ControllerParameters является null, свяжитесь с разработчиком");
-                return;
-            }
-
-            switch (Action)
-            {
-                case "action.mute.ignore":
-                    {
-                        String ActionMenu = arg.Args[1];
-                        SelectedAction ActionType = (SelectedAction)Enum.Parse(typeof(SelectedAction), arg.Args[2]);
-                        if (ActionMenu == "search.controller" && arg.Args.Length < 4)
-                            return;
-
-                        switch (ActionMenu)
-                        {
-                            case "mute.controller":
-                                {
-                                    if (!player.IsAdmin)
-                                        if (!permission.UserHasPermission(player.UserIDString, PermissionMute)) return;
-
-                                    String ActionMute = arg.Args[3];
-                                    switch (ActionMute)
-                                    {
-                                        case "mute.all.chat":
-                                        {
-                                            if (!player.IsAdmin) return;
-
-                                            if (GeneralInfo.TurnMuteAllChat)
-                                            {
-                                                GeneralInfo.TurnMuteAllChat = false;
-                                                //  ReplyBroadcast(GetLang("IQCHAT_FUNCED_NO_SEND_CHAT_UNMUTED_ALL_CHAT", player.UserIDString), AdminAlert: true);
-                                                ReplyBroadcast(null, null, true,
-                                                    "IQCHAT_FUNCED_NO_SEND_CHAT_UNMUTED_ALL_CHAT");
-                                            }
-                                            else
-                                            {
-                                                GeneralInfo.TurnMuteAllChat = true;
-                                                // ReplyBroadcast(GetLang("IQCHAT_FUNCED_NO_SEND_CHAT_MUTED_ALL_CHAT", player.UserIDString), AdminAlert: true);
-                                                ReplyBroadcast(null, null, true,
-                                                    "IQCHAT_FUNCED_NO_SEND_CHAT_MUTED_ALL_CHAT");
-                                            }
-
-                                            DrawUI_IQChat_Update_MuteChat_All(player);
-                                            break;
-                                        }
-                                        case "mute.all.voice":
-                                        {
-                                            if (!player.IsAdmin) return;
-                                            if (GeneralInfo.TurnMuteAllVoice)
-                                            {
-                                                GeneralInfo.TurnMuteAllVoice = false;
-                                                //   ReplyBroadcast(GetLang("IQCHAT_FUNCED_NO_SEND_CHAT_UMMUTED_ALL_VOICE", player.UserIDString), AdminAlert: true);
-                                                ReplyBroadcast(null, null, true,
-                                                    "IQCHAT_FUNCED_NO_SEND_CHAT_UMMUTED_ALL_VOICE");
-                                            }
-                                            else
-                                            {
-                                                GeneralInfo.TurnMuteAllVoice = true;
-                                                // ReplyBroadcast(GetLang("IQCHAT_FUNCED_NO_SEND_CHAT_MUTED_ALL_VOICE", player.UserIDString), AdminAlert: true);
-                                                ReplyBroadcast(null, null, true,
-                                                    "IQCHAT_FUNCED_NO_SEND_CHAT_MUTED_ALL_VOICE");
-
-                                            }
-
-                                            DrawUI_IQChat_Update_MuteVoice_All(player);
-                                            break;
-                                        }
-                                        default:
-                                            break;
-                                    }
-                                    break;
-                                }
-                            case "ignore.and.mute.controller":
-                                {
-                                    String ActionController = arg.Args[3];
-                                    BasePlayer TargetPlayer = BasePlayer.Find(arg.Args[4]);
-                                    UInt64.TryParse(arg.Args[4], out UInt64 ID);
-                                    Boolean isFakeUser = IsFakeUser(arg.Args[4]);
-                                    String userIdString = !isFakeUser ? String.Empty : arg.Args[4];
-
-                                    if (TargetPlayer == null && !isFakeUser) 
-                                    {
-                                        CuiHelper.DestroyUi(player, "MUTE_AND_IGNORE_PANEL_ALERT");
-                                        return;
-                                    }
-
-                                    switch (ActionController)
-                                    {
-                                        case "confirm.alert":
-                                            {
-                                                if (ActionType == SelectedAction.Ignore)
-                                                    DrawUI_IQChat_Ignore_Alert(player, TargetPlayer, ID);
-                                                else DrawUI_IQChat_Mute_Alert(player, TargetPlayer, ID);
-                                                break;
-                                            }
-                                        case "open.reason.mute":
-                                            {
-                                                MuteType Type = (MuteType)Enum.Parse(typeof(MuteType), arg.Args[5]);
-                                                DrawUI_IQChat_Mute_Alert_Reasons(player, TargetPlayer, Type, IDFake: ID);
-                                                break;
-                                            }
-                                        case "confirm.yes":
-                                            {
-                                                if (ActionType == SelectedAction.Ignore)
-                                                {
-                                                    User Info = UserInformation[player.userID];
-                                                    Info.Settings.IgnoredAddOrRemove(isFakeUser ? ID : TargetPlayer.userID);
-
-                                                    CuiHelper.DestroyUi(player, "MUTE_AND_IGNORE_PANEL_ALERT");
-                                                    DrawUI_IQChat_Mute_And_Ignore_Player_Panel(player, ActionType);
-                                                }
-                                                else
-                                                {
-                                                    MuteType Type = (MuteType)Enum.Parse(typeof(MuteType), arg.Args[5]);
-                                                    Int32 IndexReason = Int32.Parse(arg.Args[6]);
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                                                    MutePlayer(TargetPlayer, Type, IndexReason, player, fakeUserId: userIdString);
-
-                                                    CuiHelper.DestroyUi(player, "MUTE_AND_IGNORE_PANEL_ALERT");
-                                                    DrawUI_IQChat_Mute_And_Ignore_Player_Panel(player, ActionType);
-                                                }
-                                                break;
-                                            }
-                                        case "unmute.yes":
-                                            {
-                                                MuteType Type = (MuteType)Enum.Parse(typeof(MuteType), arg.Args[5]);
-
-                                                UnmutePlayer(TargetPlayer, Type, player, fakeUserId: userIdString);
-
-                                                CuiHelper.DestroyUi(player, "MUTE_AND_IGNORE_PANEL_ALERT");
-                                                DrawUI_IQChat_Mute_And_Ignore_Player_Panel(player, ActionType);
-                                                break;
-                                            }
-                                    }
-                                    break;
-                                }
-                            case "open":
-                                {
-                                    DrawUI_IQChat_Mute_And_Ignore(player, ActionType);
-                                    break;
-                                }
-                            case "page.controller":
-                                {
-                                    Int32 Page = Int32.Parse(arg.Args[3]);
-
-                                    DrawUI_IQChat_Mute_And_Ignore_Player_Panel(player, ActionType, Page);
-                                    break;
-                                }
-                            case "search.controller":
-                                {
-                                    String SearchName = arg.Args[3];
-                                    DrawUI_IQChat_Mute_And_Ignore_Player_Panel(player, ActionType, SearchName: SearchName);
-                                    break;
-                                }
-                            default:
-                                break;
-                        }
-
-                        break;
-                    }
-                case "checkbox.controller":
-                    {
-                        ElementsSettingsType Type = (ElementsSettingsType)Enum.Parse(typeof(ElementsSettingsType), arg.Args[1]);
-                        if (!UserInformation.ContainsKey(player.userID)) return;
-                        User Info = UserInformation[player.userID];
-                        if (Info == null) return;
-
-                        switch (Type)
-                        {
-                            case ElementsSettingsType.PM:
-                                {
-                                    if (Info.Settings.TurnPM)
-                                        Info.Settings.TurnPM = false;
-                                    else Info.Settings.TurnPM = true;
-
-                                    DrawUI_IQChat_Update_Check_Box(player, Type, "143.38 -67.9", "151.38 -59.9", Info.Settings.TurnPM);
-                                    break;
-                                }
-                            case ElementsSettingsType.Broadcast:
-                                {
-                                    if (Info.Settings.TurnBroadcast)
-                                        Info.Settings.TurnBroadcast = false;
-                                    else Info.Settings.TurnBroadcast = true;
-
-                                    DrawUI_IQChat_Update_Check_Box(player, Type, "143.38 -79.6", "151.38 -71.6", Info.Settings.TurnBroadcast);
-                                    break;
-                                }
-                            case ElementsSettingsType.Alert:
-                                {
-                                    if (Info.Settings.TurnAlert)
-                                        Info.Settings.TurnAlert = false;
-                                    else Info.Settings.TurnAlert = true;
-
-                                    DrawUI_IQChat_Update_Check_Box(player, Type, "143.38 -91.6", "151.38 -83.6", Info.Settings.TurnAlert);
-                                    break;
-                                }
-                            case ElementsSettingsType.Sound:
-                                {
-                                    if (Info.Settings.TurnSound)
-                                        Info.Settings.TurnSound = false;
-                                    else Info.Settings.TurnSound = true;
-
-                                    DrawUI_IQChat_Update_Check_Box(player, Type, "143.38 -103.6", "151.38 -95.6", Info.Settings.TurnSound);
-                                    break;
-                                }
-                            default:
-                                break;
-                        }
-                        break;
-                    }
-                case "droplist.controller":
-                    {
-                        String ActionDropList = arg.Args[1];
-                        TakeElementUser Element = (TakeElementUser)Enum.Parse(typeof(TakeElementUser), arg.Args[2]);
-
-                        switch (ActionDropList)
-                        {
-                            case "open":
-                                {
-                                    DrawUI_IQChat_OpenDropList(player, Element);
-                                    break;
-                                }
-                            case "page.controller":
-                                {
-                                    String ActionDropListPage = arg.Args[3];
-                                    Int32 Page = (Int32)Int32.Parse(arg.Args[4]);
-                                    Page = ActionDropListPage == "+" ? Page + 1 : Page - 1;
-
-                                    DrawUI_IQChat_OpenDropList(player, Element, Page);
-                                    break;
-                                }
-                            case "element.take":
-                                {
-                                    Int32 Count = Int32.Parse(arg.Args[3]);
-                                    String Permissions = arg.Args[4];
-                                    
-                                    String Argument = String.Join(" ", arg.Args.Skip(5));
-                                    if (!permission.UserHasPermission(player.UserIDString, Permissions)) return;
-                                    if (!UserInformation.ContainsKey(player.userID)) return;
-                                    User User = UserInformation[player.userID];
-                                    if (User == null) return;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                                    switch (Element)
-                                    {
-                                        case TakeElementUser.MultiPrefix:
-                                            {
-                                                if (!User.Info.PrefixList.Contains(Argument))
-                                                {
-                                                    User.Info.PrefixList.Add(Argument);
-                                                    DrawUI_IQChat_OpenDropListArgument(player, Count);
-                                                }
-                                                else
-                                                {
-                                                    User.Info.PrefixList.Remove(Argument);
-                                                    CuiHelper.DestroyUi(player, $"TAKED_INFO_{Count}");
-                                                }
-                                                break;
-                                            }
-                                        case TakeElementUser.Prefix:
-                                            User.Info.Prefix = User.Info.Prefix.Equals(Argument) ? String.Empty : Argument;
-                                            break;
-                                        case TakeElementUser.Nick:
-                                            User.Info.ColorNick = Argument;
-                                            User.Info.CustomColorNick = String.Empty;
-                                            break;
-                                        case TakeElementUser.Chat:
-                                            User.Info.ColorMessage = Argument;
-                                            User.Info.CustomColorMessage = String.Empty;
-                                            break;
-                                        case TakeElementUser.Rank:
-                                            {
-                                                User.Info.Rank = Argument;
-                                                IQRankSetRank(player.userID, Argument);
-                                            }
-                                            break;
-                                        default:
-                                            break;
-                                    }
-                                    DrawUI_IQChat_Update_DisplayName(player);
-                                    break;
-                                }
-                        }
-                        break;
-                    }
-                case "slider.controller": // newui.cmd slider.controller 0 +
-                    {
-                        TakeElementUser Element = (TakeElementUser)Enum.Parse(typeof(TakeElementUser), arg.Args[1]);
-                        List<Configuration.ControllerParameters.AdvancedFuncion> SliderElements = new List<Configuration.ControllerParameters.AdvancedFuncion>();
-                        User Info = UserInformation[player.userID];
-                        if (Info == null) return;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                        InformationOpenedUI InfoUI = LocalBase[player];
-                        if (InfoUI == null) return;
-
-
-                        String ActionSlide = arg.Args[2];
-
-                        switch (Element)
-                        {
-                            case TakeElementUser.Prefix:
-                                {
-                                    SliderElements = LocalBase[player].ElementsPrefix;
-
-                                    if (SliderElements == null || SliderElements.Count == 0) return;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                                    if (ActionSlide == "+")
-                                    {
-                                        InfoUI.SlideIndexPrefix++;
-
-                                        if (InfoUI.SlideIndexPrefix >= SliderElements.Count)
-                                            InfoUI.SlideIndexPrefix = 0;
-                                    }
-                                    else
-                                    {
-                                        InfoUI.SlideIndexPrefix--;
-
-                                        if (InfoUI.SlideIndexPrefix < 0)
-                                            InfoUI.SlideIndexPrefix = SliderElements.Count - 1;
-                                    }
-
-                                    Info.Info.Prefix = SliderElements[InfoUI.SlideIndexPrefix].Argument;
-                                }
-                                break;
-                            case TakeElementUser.Nick:
-                                {
-                                    SliderElements = LocalBase[player].ElementsNick;
-
-                                    if (SliderElements == null || SliderElements.Count == 0) return;
-
-                                    if (ActionSlide == "+")
-                                    {
-                                        InfoUI.SlideIndexNick++;
-
-                                        if (InfoUI.SlideIndexNick >= SliderElements.Count)
-                                            InfoUI.SlideIndexNick = 0;
-                                    }
-                                    else
-                                    {
-                                        InfoUI.SlideIndexNick--;
-
-                                        if (InfoUI.SlideIndexNick < 0)
-                                            InfoUI.SlideIndexNick = SliderElements.Count - 1;
-                                    }
-                                    Info.Info.ColorNick = SliderElements[InfoUI.SlideIndexNick].Argument;
-                                    Info.Info.CustomColorNick = String.Empty;
-                                }
-                                break;
-                            case TakeElementUser.Chat:
-                                {
-                                    SliderElements = LocalBase[player].ElementsChat;
-                                    if (SliderElements == null || SliderElements.Count == 0) return;
-
-                                    if (ActionSlide == "+")
-                                    {
-                                        InfoUI.SlideIndexChat++;
-
-                                        if (InfoUI.SlideIndexChat >= SliderElements.Count)
-                                            InfoUI.SlideIndexChat = 0;
-                                    }
-                                    else
-                                    {
-                                        InfoUI.SlideIndexChat--;
-
-                                        if (InfoUI.SlideIndexChat < 0)
-                                            InfoUI.SlideIndexChat = SliderElements.Count - 1;
-                                    }
-                                    Info.Info.ColorMessage = SliderElements[InfoUI.SlideIndexChat].Argument;
-                                    Info.Info.CustomColorMessage = String.Empty;
-                                }
-                                break;
-                            case TakeElementUser.Rank:
-                                {
-                                    SliderElements = LocalBase[player].ElementsRanks;
-                                    if (SliderElements == null || SliderElements.Count == 0) return;
-
-                                    if (ActionSlide == "+")
-                                    {
-                                        InfoUI.SlideIndexRank++;
-
-                                        if (InfoUI.SlideIndexRank >= SliderElements.Count)
-                                            InfoUI.SlideIndexRank = 0;
-                                    }
-                                    else
-                                    {
-                                        InfoUI.SlideIndexRank--;
-
-                                        if (InfoUI.SlideIndexRank < 0)
-                                            InfoUI.SlideIndexRank = SliderElements.Count - 1;
-                                    }
-                                    Info.Info.Rank = SliderElements[InfoUI.SlideIndexRank].Argument;
-                                    IQRankSetRank(player.userID, SliderElements[InfoUI.SlideIndexRank].Argument);
-                                }
-                                break;
-                            default:
-                                break;
-                        }
-                        DrawUI_IQChat_Slider_Update_Argument(player, Element);
-                        DrawUI_IQChat_Update_DisplayName(player);
-                        break;
-                    }
-                default:
-                    break;
-            }
-        }
-        void Alert(BasePlayer Sender, BasePlayer Recipient, string[] arg)
-        {
-            String Message = GetMessageInArgs(Sender, arg);
-            if (Message == null) return;
-
-            ReplySystem(Recipient, Message);
-        }
-        void ReplySystem(BasePlayer player, String Message, String CustomPrefix = null, String CustomAvatar = null, String CustomHex = null)
-        {
-            Configuration.ControllerMessage ControllerMessages = config.ControllerMessages;
-
-            String Prefix = (CustomPrefix == null || String.IsNullOrWhiteSpace(CustomPrefix)) ? (ControllerMessages.GeneralSetting.BroadcastFormat.BroadcastTitle == null || String.IsNullOrWhiteSpace(ControllerMessages.GeneralSetting.BroadcastFormat.BroadcastTitle)) ? "" : ControllerMessages.GeneralSetting.BroadcastFormat.BroadcastTitle : CustomPrefix;
-            String AvatarID = (CustomAvatar == null || String.IsNullOrWhiteSpace(CustomAvatar)) ? (ControllerMessages.GeneralSetting.BroadcastFormat.Steam64IDAvatar == null || String.IsNullOrWhiteSpace(ControllerMessages.GeneralSetting.BroadcastFormat.Steam64IDAvatar)) ? "0" : ControllerMessages.GeneralSetting.BroadcastFormat.Steam64IDAvatar : CustomAvatar;
-            String Hex = (CustomHex == null || String.IsNullOrWhiteSpace(CustomHex)) ? (ControllerMessages.GeneralSetting.BroadcastFormat.BroadcastColor == null || String.IsNullOrWhiteSpace(ControllerMessages.GeneralSetting.BroadcastFormat.BroadcastColor)) ? "#ffff" : ControllerMessages.GeneralSetting.BroadcastFormat.BroadcastColor : CustomHex;
-           
-            player.SendConsoleCommand("chat.add", Chat.ChatChannel.Global, AvatarID, $"{Prefix}<color={Hex}>{Message}</color>");
+                    ChatPrefix = config.AutoSetupSetting.ReturnDefaultSetting.PrefixDefault,
+                    NickColor = config.AutoSetupSetting.ReturnDefaultSetting.NickDefault,
+                    MessageColor = config.AutoSetupSetting.ReturnDefaultSetting.MessageDefault,
+                    MuteChatTime = 0,
+                    MuteVoiceTime = 0,
+                    AlertTurn = true,
+                    PMTurn = true,
+                    BroadcastTurn = true,
+                    SoundTurn = true,
+                    GlobalChatTurn = true,
+                    MultiPrefix = new List<string> { },
+                    IgnoredUsers = new List<ulong> { },
+                    
+                });
         }
 
-        
-                void AlertUI(BasePlayer Sender, string[] arg)
-        {
-            if (_interface == null)
-            {
-                PrintWarning(LanguageEn ? "We generate the interface, wait for a message about successful generation" : "Генерируем интерфейс, ожидайте сообщения об успешной генерации");
-                return;
-            }
-            String Message = GetMessageInArgs(Sender, arg);
-            if (Message == null) return;
+        #endregion
 
-            foreach (BasePlayer PlayerInList in BasePlayer.activePlayerList)
-                DrawUI_IQChat_Alert(PlayerInList, Message);
+        #region Hooks     
+        private bool OnPlayerChat(BasePlayer player, string message, Chat.ChatChannel channel)
+        {
+            if (Interface.Oxide.CallHook("CanChatMessage", player, message) != null) return false;
+            SeparatorChat(channel, player, message);
+            return false;
         }
-        void Alert(BasePlayer Sender, string[] arg, Boolean IsAdmin)
+        private object OnServerMessage(string message, string name)
         {
-            String Message = GetMessageInArgs(Sender, arg);
-            if (Message == null) return;
-
-            ReplyBroadcast(Message, AdminAlert: IsAdmin);
-
-            if (config.RustPlusSettings.UseRustPlus)
-                foreach (BasePlayer playerList in BasePlayer.activePlayerList)
-                    NotificationList.SendNotificationTo(playerList.userID, NotificationChannel.SmartAlarm, config.RustPlusSettings.DisplayNameAlert, Message, Util.GetServerPairingData());
-        }
-
-        private void DrawUI_IQChat_Alert(BasePlayer player, String Description, String Title = null)
-        {
-            if (_interface == null)
-            {
-                PrintWarning("Генерируем интерфейс, ожидайте сообщения об успешной генерации");
-                return;
-            }
-            String Interface = InterfaceBuilder.GetInterface("UI_Chat_Alert");
-            if (Interface == null) return;
-
-            Interface = Interface.Replace("%TITLE%", Title ?? GetLang("IQCHAT_ALERT_TITLE", player.UserIDString));
-            Interface = Interface.Replace("%DESCRIPTION%", Description);
-
-            CuiHelper.DestroyUi(player, InterfaceBuilder.UI_Chat_Alert);
-            CuiHelper.AddUi(player, Interface);
-
-            player.Invoke(() =>
-            {
-                CuiHelper.DestroyUi(player, InterfaceBuilder.UI_Chat_Alert);
-            }, config.ControllerMessages.GeneralSetting.OtherSetting.TimeDeleteAlertUI);
-        }
-        private void CheckValidateUsers()
-        {
-            Configuration.ControllerParameters Controller = config.ControllerParameter;
-            Configuration.ControllerConnection ControllerConnection = config.ControllerConnect;
-
-            List<Configuration.ControllerParameters.AdvancedFuncion> Prefixes = Controller.Prefixes.Prefixes;
-            List<Configuration.ControllerParameters.AdvancedFuncion> NickColor = Controller.NickColorList;
-            List<Configuration.ControllerParameters.AdvancedFuncion> ChatColor = Controller.MessageColorList;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            foreach (KeyValuePair<UInt64, User> Info in UserInformation)
-            {
-                if (Controller.Prefixes.TurnMultiPrefixes)
-                {
-                    foreach (String Prefix in Info.Value.Info.PrefixList.Where(prefixList => !Prefixes.Exists(i => i.Argument == prefixList)))
-                        NextTick(() => Info.Value.Info.PrefixList.Remove(Prefix));
-                }
-                else
-                {
-                    if (!Prefixes.Exists(i => i.Argument == Info.Value.Info.Prefix))
-                        Info.Value.Info.Prefix = ControllerConnection.SetupDefaults.PrefixDefault;
-                }
-                if (!NickColor.Exists(i => i.Argument == Info.Value.Info.ColorNick))
-                    Info.Value.Info.ColorNick = ControllerConnection.SetupDefaults.NickDefault;
-
-                if (!ChatColor.Exists(i => i.Argument == Info.Value.Info.ColorMessage))
-                    Info.Value.Info.ColorMessage = ControllerConnection.SetupDefaults.MessageDefault;
-            }
-        }
-        private IOrderedEnumerable<BasePlayer> GetPlayerList(String searchName, SelectedAction action)
-        {
-            List<BasePlayer> basePlayerList = BasePlayer.activePlayerList.ToList();
-
-            if (searchName != null)
-                basePlayerList = basePlayerList.Where(p => UserInformation.ContainsKey(p.userID) && p.displayName.ToLower().Contains(searchName.ToLower())).ToList();
-
-            return action == SelectedAction.Mute ?
-                basePlayerList.OrderBy(p => UserInformation[p.userID].MuteInfo.IsMute(MuteType.Chat) || UserInformation[p.userID].MuteInfo.IsMute(MuteType.Voice)) :
-                basePlayerList.OrderBy(p => UserInformation[p.userID].Settings.IgnoreUsers.Contains(p.userID));
-        }
-        private void ReplyTranslationMessage(Chat.ChatChannel channel, BasePlayer player, BasePlayer playerSender, String OutMessage, String FormatMessage, String FormatPlayer, UInt64 RenameID)
-        {
-            ListHashSet<BasePlayer> playerList = GetPlayerList(player, channel);
-            if (playerList == null) return;
-
-            if (!String.IsNullOrWhiteSpace(config.ReferenceSetting.translationApiSettings.codeLanguagePrimary))
-            {
-                Action<String> callback = translation =>
-                {
-                    foreach (BasePlayer p in playerList)
-                        ReplyPlayerChat(channel, p, playerSender, !permission.UserHasPermission(p.UserIDString, PermissionTranslationIgnore) ? translation : OutMessage, FormatMessage, FormatPlayer, RenameID);
-                };
-
-                TranslationAPI.Call("Translate", OutMessage, config.ReferenceSetting.translationApiSettings.codeLanguagePrimary, "auto", callback);
-            }
-            else
-            {
-                foreach (BasePlayer p in playerList)
-                {
-                    String codeResult = lang.GetLanguage(p.UserIDString);
-                    saveTranslate.TryAdd(codeResult, new TranslationState());
-
-                    Action<String> callback = translation =>
-                    {
-                        saveTranslate[codeResult].IsProcessed = true;
-                        saveTranslate[codeResult].Translation = translation;
-                        saveTranslate[codeResult].DoTranslation = OutMessage;
-                        
-                        ReplyPlayerChat(channel, p, playerSender,!permission.UserHasPermission(p.UserIDString, PermissionTranslationIgnore) ? translation : OutMessage, FormatMessage, FormatPlayer, RenameID);
-                    };
-
-                    if (lang.GetLanguage(player.UserIDString) == codeResult)
-                        ReplyPlayerChat(channel, p, playerSender, OutMessage, FormatMessage, FormatPlayer, RenameID);
-                    else if (saveTranslate[codeResult].IsProcessed && !string.IsNullOrWhiteSpace(saveTranslate[codeResult].Translation) && OutMessage == saveTranslate[codeResult].DoTranslation)
-                        ReplyPlayerChat(channel, p, playerSender, saveTranslate[codeResult].Translation, FormatMessage, FormatPlayer, RenameID);
-                    else TranslationAPI.Call("Translate", OutMessage, codeResult, "auto", callback);
-                }
-            }
-        }
-
-        private String Format(Int32 units, String form1, String form2, String form3)
-        {
-            var tmp = units % 10;
-
-            if (units >= 5 && units <= 20 || tmp >= 5 && tmp <= 9)
-                return $"{units}{form1}";
-
-            if (tmp >= 2 && tmp <= 4)
-                return $"{units}{form2}";
-
-            return $"{units}{form3}";
-        }
-
-        
-        private static InterfaceBuilder _interface;
-        void AlertUI(BasePlayer Sender, BasePlayer Recipient, string[] arg)
-        {
-            if (_interface == null)
-            {
-                PrintWarning(LanguageEn ? "We generate the interface, wait for a message about successful generation" : "Генерируем интерфейс, ожидайте сообщения об успешной генерации");
-                return;
-            }
-            String Message = GetMessageInArgs(Sender, arg);
-            if (Message == null) return;
-
-            DrawUI_IQChat_Alert(Recipient, Message);
-        }
-        private Boolean HasMorePages<T>(IEnumerable<T> items, Int32 page) => items != null && items.Skip(18 * (page + 1)).Any();
-
-        public class Fields
-        {
-            public string name { get; set; }
-            public string value { get; set; }
-            public bool inline { get; set; }
-            public Fields(string name, string value, bool inline)
-            {
-                this.name = name;
-                this.value = value;
-                this.inline = inline;
-            }
-        }
-        
-        private void DiscordLoggPM(BasePlayer Sender, BasePlayer Reciepter, String MessageLogged)
-        {
-            Configuration.OtherSettings.General PMChat = config.OtherSetting.LogsPMChat;
-            if (PMChat == null || !PMChat.UseLogged || String.IsNullOrWhiteSpace(PMChat.Webhooks)) return;
-            if (Sender == null || Reciepter == null) return;
-            
-            GeneralInformation.RenameInfo SenderRename = GeneralInfo.GetInfoRename(Sender.userID);
-            GeneralInformation.RenameInfo ReciepterRename = GeneralInfo.GetInfoRename(Reciepter.userID);
-
-            UInt64 UserIDSender = SenderRename != null ? SenderRename.RenameID == 0 ? Sender.userID : SenderRename.RenameID : Sender.userID;
-            UInt64 UserIDReciepter = ReciepterRename != null ? ReciepterRename.RenameID == 0 ? Reciepter.userID : ReciepterRename.RenameID : Reciepter.userID;
-            String SenderName = SenderRename != null ? ReciepterRename.RenameNick ?? Sender.displayName : Sender.displayName;
-            String ReciepterName = ReciepterRename != null ? ReciepterRename.RenameNick ?? Reciepter.displayName : Reciepter.displayName;
-
-            List<Fields> fields = new List<Fields>
-                        {
-                            new Fields(LanguageEn ? "Sender" : "Отправитель", $"{SenderName}({UserIDSender})", true),
-                            new Fields(LanguageEn ? "Recipient" : "Получатель", $"{ReciepterName}({UserIDReciepter})", true),
-                            new Fields(LanguageEn ? "Message" : "Сообщение", MessageLogged, false),
-                        };
-
-            FancyMessage newMessage = new FancyMessage(null, false, new FancyMessage.Embeds[1] { new FancyMessage.Embeds(null, 16608621, fields, new Authors("IQChat PM-History", null, "https://i.postimg.cc/SshGgy52/xiwsg5m.png", null), null) });
-
-            Request($"{PMChat.Webhooks}", newMessage.toJSON());
-        }
-        
-        private void DrawUI_IQChat_Mute_And_Ignore_Pages(BasePlayer player, Boolean IsNextPage, SelectedAction Action, Int32 Page = 0)
-        {
-            String Interface = InterfaceBuilder.GetInterface("UI_Chat_Mute_And_Ignore_Pages");
-            if (Interface == null) return;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            String CommandRight = IsNextPage ? $"newui.cmd action.mute.ignore page.controller {Action} {Page + 1}" : String.Empty;
-            String ColorRight = String.IsNullOrEmpty(CommandRight) ? "1 1 1 0.1" : "1 1 1 1";
-
-            String CommandLeft = Page > 0 ? $"newui.cmd action.mute.ignore page.controller {Action} {Page - 1}" : String.Empty;
-            String ColorLeft = String.IsNullOrEmpty(CommandLeft) ? "1 1 1 0.1" : "1 1 1 1";
-
-            Interface = Interface.Replace("%COMMAND_LEFT%", CommandLeft);
-            Interface = Interface.Replace("%COMMAND_RIGHT%", CommandRight);
-            Interface = Interface.Replace("%PAGE%", $"{Page}");
-            Interface = Interface.Replace("%COLOR_LEFT%", ColorLeft);
-            Interface = Interface.Replace("%COLOR_RIGHT%", ColorRight);
-
-            CuiHelper.DestroyUi(player, "PageCount");
-            CuiHelper.DestroyUi(player, "LeftPage");
-            CuiHelper.DestroyUi(player, "RightPage");
-            CuiHelper.AddUi(player, Interface);
-        }
-        private const String PermissionMute = "iqchat.muteuse";
-        
-        private void DiscordCompactLoggChat(BasePlayer player, Chat.ChatChannel Channel, String MessageLogged)
-        {
-            String ChannelTitle = (LanguageEn ? (Channel == Chat.ChatChannel.Global ? "Global" : Channel == Chat.ChatChannel.Local ? "Local" : "Team") : (Channel == Chat.ChatChannel.Global ? "Глобальный чат" : Channel == Chat.ChatChannel.Local ? "Локальный чат" : "Командный чат"));
-            String Format = config.OtherSetting.CompactLogsChat.ShowSteamID
-                ? $"[{DateTime.Now.ToShortTimeString()}] [{ChannelTitle}] {player.displayName} ({player.userID}): {MessageLogged}"
-                : $"[{DateTime.Now.ToShortTimeString()}] [{ChannelTitle}] {player.displayName}: {MessageLogged}";
-            
-            FancyMessage newMessage = new FancyMessage(Format, false, null);
-
-            switch (Channel)
-            {
-                case Chat.ChatChannel.Local:
-                case Chat.ChatChannel.Global:
-                {
-                    Configuration.OtherSettings.General GlobalChat = config.OtherSetting.CompactLogsChat.LogsCompactChat.GlobalChatSettings;
-                    if (!GlobalChat.UseLogged || String.IsNullOrWhiteSpace(GlobalChat.Webhooks)) return;
-                    Request($"{GlobalChat.Webhooks}", newMessage.toJSON());
-                    break;
-                }
-                case Chat.ChatChannel.Team:
-                {
-                    Configuration.OtherSettings.General TeamChat = config.OtherSetting.CompactLogsChat.LogsCompactChat.TeamChatSettings;
-                    if (!TeamChat.UseLogged || String.IsNullOrWhiteSpace(TeamChat.Webhooks)) return;
-                    Request($"{TeamChat.Webhooks}", newMessage.toJSON());
-                }
-                    break;
-                default:
-                    break;
-            }
-        }
-		   		 		  						  	   		  		 			  		  		  			 		   			
-        [ChatCommand("alertui")]
-        private void AlertUIChatCommand(BasePlayer Sender, String cmd, String[] args)
-        {
-            if (!permission.UserHasPermission(Sender.UserIDString, PermissionAlert)) return;
-            AlertUI(Sender, args);
-        }
-        Boolean API_IS_IGNORED(UInt64 UserHas, UInt64 User)
-        {
-            if (!UserInformation.ContainsKey(UserHas)) return false;
-            if (!UserInformation.ContainsKey(User)) return false;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            return UserInformation[UserHas].Settings.IsIgnored(User);
-        }
-
-        private String GetLastMessage(BasePlayer player, Int32 Count)
-        {
-            String Messages = String.Empty;
-
-            if (LastMessagesChat.ContainsKey(player))
-            {
-                foreach (String Message in LastMessagesChat[player].Skip(LastMessagesChat[player].Count - Count))
-                    Messages += $"\n{Message}";
-            }
-
-            return Messages;
-        }
-        
-        public static Regex regex = new Regex(@"(:\w+:|<[^>]+>)");
-        String API_GET_DEFAULT_NICK_COLOR() => config.ControllerConnect.SetupDefaults.NickDefault;
-
-
-        [ChatCommand("unmute")]
-        void UnMuteCustomChat(BasePlayer Moderator, string cmd, string[] arg)
-        {
-            if (!permission.UserHasPermission(Moderator.UserIDString, PermissionMute)) return;
-            if (arg == null || arg.Length != 1 || arg.Length > 1)
-            {
-                ReplySystem(Moderator, LanguageEn ? "Invalid syntax, please use : unmute Steam64ID" : "Неверный синтаксис,используйте : unmute Steam64ID");
-                return;
-            }
-            string NameOrID = arg[0];
-            
-            if (IsFakeUser(NameOrID))
-            {
-                List<FakePlayer> playerList = GetCombinedPlayerList();
-                if (playerList != null)
-                {
-                    FakePlayer fakeUser = playerList.FirstOrDefault(x => x.userId.Equals(NameOrID) || x.displayName.ToLower().Contains(NameOrID.ToLower()));
-                    if (fakeUser != null)
-                        UnmutePlayer(null, MuteType.Chat, Moderator, false, true, fakeUser.userId);
-                }
-                return;
-            }
-            
-            BasePlayer target = GetPlayerNickOrID(NameOrID);
-            if (target == null)
-            {
-                UInt64 Steam64ID = 0;
-                if (UInt64.TryParse(NameOrID, out Steam64ID))
-                {
-                    if (UserInformation.ContainsKey(Steam64ID))
-                    {
-                        User Info = UserInformation[Steam64ID];
-                        if (Info == null) return;
-                        if (!Info.MuteInfo.IsMute(MuteType.Chat))
-                        {
-                            ReplySystem(Moderator, LanguageEn ? "The player does not have a chat lock" : "У игрока нет блокировки чата");
-                            return;
-                        }
-                        
-                        if (!Moderator.IsAdmin && Moderator.userID == Steam64ID)
-                        {
-                            ReplySystem(Moderator, GetLang("FUNC_MESSAGE_UNMUTE_YOURSELF", Moderator.UserIDString));
-                            return;
-                        }
-
-                        Info.MuteInfo.UnMute(MuteType.Chat);
-                        ReplySystem(Moderator, LanguageEn ? "You have unblocked the offline chat to the player" : "Вы разблокировали чат offline игроку");
-                        return;
-                    }
-                    else
-                    {
-                        ReplySystem(Moderator, LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                        return;
-                    }
-                }
-                else
-                {
-                    ReplySystem(Moderator, LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                    return;
-                }
-            }
-            UnmutePlayer(target, MuteType.Chat, Moderator, false, true);
-        }
-        internal class AntiNoob
-        {
-            public DateTime DateConnection = DateTime.UtcNow;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            public Boolean IsNoob(Int32 TimeBlocked)
-            {
-                System.TimeSpan Time = DateTime.UtcNow.Subtract(DateConnection);
-                return Time.TotalSeconds < TimeBlocked;
-            }
-
-            public Double LeftTime(Int32 TimeBlocked)
-            {
-                System.TimeSpan Time = DateTime.UtcNow.Subtract(DateConnection);
-
-                return (TimeBlocked - Time.TotalSeconds);
-            }
-        }
-        
-        
-        private void ControlledBadNick(IPlayer player)
-        {
-            if (player == null) return;
-            Configuration.ControllerMessage ControllerMessage = config.ControllerMessages;
-
-            String DisplayName = player.Name;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            Tuple<String, Boolean> GetTupleNick = BadWordsCleaner(DisplayName,
-                ControllerMessage.Formatting.ControllerNickname.ReplaceBadNick,
-                ControllerMessage.Formatting.ControllerNickname.BadNicks);
-            DisplayName = GetTupleNick.Item1;
-
-            DisplayName = RemoveLinkText(DisplayName);
-            player.Rename(DisplayName);
-        }
-
-        private String GetReferenceTags(BasePlayer player)
-        {
-            String Result = String.Empty;
-            String Rank = String.Empty;
-            String RankTime = String.Empty;
-            if (IQRankSystem)
-            {
-                Configuration.ReferenceSettings.IQRankSystem IQRank = config.ReferenceSetting.IQRankSystems;
-
-                if (IQRank.UseRankSystem)
-                {
-                    if (IQRank.UseTimeStandart)
-                        RankTime = String.IsNullOrWhiteSpace(IQRankGetTimeGame(player.userID)) ? String.Empty : String.Format(IQRank.FormatRankTime, IQRankGetTimeGame(player.userID));
-                    Rank = String.IsNullOrWhiteSpace(IQRankGetRank(player.userID)) ? String.Empty : String.Format(IQRank.FormatRank, IQRankGetRank(player.userID));
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                    if (!String.IsNullOrWhiteSpace(RankTime))
-                        Result += $"{RankTime} ";
-                    if (!String.IsNullOrWhiteSpace(Rank))
-                        Result += $"{Rank} ";
-                }
-            }
-
-            String XPrison = XPrison_GetPrefix(player);
-            if (!String.IsNullOrWhiteSpace(XPrison))
-                Result += $"{XPrison} ";
-            
-            String XLevel = config.ReferenceSetting.XLevelsSettings.UseFullXLevels ? XLevel_GetPrefix(player) : XLevel_GetLevel(player);
-            if (!String.IsNullOrWhiteSpace(XLevel))
-                Result += $"{XLevel} ";
-
-            String ClanTag = GetClanTag(player.userID);
-            if (!String.IsNullOrWhiteSpace(ClanTag))
-                Result += $"{ClanTag} ";
-
-            String SkillTree = config.ReferenceSetting.skillTreeSettings.UseFullSkillTree ? $"{SkillTree_GetLevel(player)} {SkillTree_GetXP(player)}" : $"{SkillTree_GetLevel(player)}";
-            if (!String.IsNullOrWhiteSpace(SkillTree))
-                Result += $"{SkillTree} ";
-
-            String PrestigeSkillTree = GetPrestigeLevel(player.userID.Get());
-            if (!String.IsNullOrWhiteSpace(PrestigeSkillTree))
-                Result += $"{PrestigeSkillTree} ";
-            
-            String PlayerRanks = PlayerRanks_GetRanks(player);
-            if (!String.IsNullOrWhiteSpace(PlayerRanks))
-                Result += $"{PlayerRanks} ";
-            
-            String hookResult = Interface.Call<String>("OnChatReferenceTags", player);
-            if (!String.IsNullOrWhiteSpace(hookResult))
-                Result += $"{hookResult} ";
-            
-            return Result;
-        }
-        private static ImageUI _imageUI;
-
-        
-        
-        private void ReplyPlayerChat(Chat.ChatChannel channel, BasePlayer player, BasePlayer playerSender, String OutMessage, String FormatMessage, String FormatPlayer, UInt64 RenameID)
-        {
-            Configuration.ControllerMessage ControllerMessages = config.ControllerMessages;
-            
-            User Info = UserInformation[playerSender.userID];
-            String colorMessage = !String.IsNullOrWhiteSpace(Info.Info.CustomColorMessage)
-                ? Info.Info.CustomColorMessage
-                : Info.Info.ColorMessage;
-            
-            Object resultColorMessage = IsGradientColorValue(colorMessage);
-            if (resultColorMessage is List<String> gradientColors)
-                OutMessage = ApplyGradientToText(OutMessage, gradientColors);
-            else OutMessage = !String.IsNullOrWhiteSpace(colorMessage) ? $"<color={colorMessage}>{OutMessage}</color>" : OutMessage;
-            
-            String messageSend = String.Format(FormatMessage, OutMessage);
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            if (messageSend.Contains("@"))
-            {
-                String SplittedName = messageSend.Substring(messageSend.IndexOf('@')).Replace("@", "").Split(' ')[0];
-
-                BasePlayer playerTags = GetPlayerNickOrID(SplittedName);
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                if (playerTags != null)
-                {
-                    User InfoP = UserInformation[playerTags.userID];
-
-                    if (InfoP.Settings.TurnAlert && player == playerTags)
-                    {
-                        ReplySystem(player, $"<size=16>{messageSend.Trim()}</size>", GetLang("IQCHAT_FUNCED_ALERT_TITLE", player.UserIDString, playerTags.displayName), player.UserIDString, ControllerMessages.GeneralSetting.AlertFormat.AlertPlayerColor);
-                        if (InfoP.Settings.TurnSound)
-                            Effect.server.Run(ControllerMessages.GeneralSetting.AlertFormat.SoundAlertPlayer, playerTags.GetNetworkPosition());
-                    }
-                    else player.SendConsoleCommand("chat.add", (int)channel, RenameID, $"{FormatPlayer}: {messageSend}");
-                }
-                else player.SendConsoleCommand("chat.add", (int)channel, RenameID, $"{FormatPlayer}: {messageSend}");
-            }
-            else player.SendConsoleCommand("chat.add", (int)channel, RenameID, $"{FormatPlayer}: {messageSend}");
-            
-            player.ConsoleMessage($"{FormatPlayer} {messageSend}");
-        }
-        
-        private class InterfaceBuilder
-        {
-            
-            public static InterfaceBuilder Instance;
-            public const String UI_Chat_Context = "UI_IQCHAT_CONTEXT";
-            public const String UI_Chat_Context_Visual_Nick = "UI_IQCHAT_CONTEXT_VISUAL_NICK";
-            public const String UI_Chat_Alert = "UI_IQCHAT_ALERT";
-            public Dictionary<String, String> Interfaces;
-
-            
-            
-            public InterfaceBuilder()
-            {
-                Instance = this;
-                Interfaces = new Dictionary<String, String>();
-                BuildingStaticContext();
-                BuildingVisualNick();
-                BuildingCheckBox();
-
-                BuildingModerationStatic();
-                BuildingMuteAllChat();
-                BuildingMuteAllVoice();
-
-                BuildingSlider();
-                BuildingSliderUpdateArgument();
-
-                BuildingDropList();
-                BuildingOpenDropList();
-                BuildingElementDropList();
-                BuildingElementDropListTakeLine();
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                BuildingAlertUI();
-
-                BuildingMuteAndIgnore();
-                BuildingMuteAndIgnorePlayerPanel();
-                BuildingMuteAndIgnorePlayer();
-                BuildingMuteAndIgnorePages();
-
-                BuildingMuteAndIgnorePanelAlert();
-                BuildingIgnoreAlert();
-                BuildingMuteAlert();
-                BuildingMuteAlert_DropList_Title();
-                BuildingMuteAlert_DropList_Reason();
-            }
-
-            public static void AddInterface(String name, String json)
-            {
-                if (Instance.Interfaces.ContainsKey(name))
-                {
-                    _.PrintError($"Error! Tried to add existing cui elements! -> {name}");
-                    return;
-                }
-
-                Instance.Interfaces.Add(name, json);
-            }
-
-            public static string GetInterface(String name)
-            {
-                string json = string.Empty;
-                if (Instance.Interfaces.TryGetValue(name, out json) == false)
-                {
-                    _.PrintWarning($"Warning! UI elements not found by name! -> {name}");
-                }
-
-                return json;
-            }
-
-            public static void DestroyAll()
-            {
-                for (var i = 0; i < BasePlayer.activePlayerList.Count; i++)
-                {
-                    var player = BasePlayer.activePlayerList[i];
-                    CuiHelper.DestroyUi(player, UI_Chat_Context);
-                    CuiHelper.DestroyUi(player, UI_Chat_Context_Visual_Nick);
-                    CuiHelper.DestroyUi(player, UI_Chat_Alert);
-                    CuiHelper.DestroyUi(player, "MUTE_AND_IGNORE_PANEL_ALERT");
-                }
-            }
-
-            
-            
-                        private void BuildingVisualNick()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-
-                container.Add(new CuiElement
-                {
-                    Name = UI_Chat_Context_Visual_Nick,
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiTextComponent { Text = "%NICK_DISPLAY%", Font = "robotocondensed-regular.ttf", FontSize = 7, Align = TextAnchor.MiddleLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-135.769 -89.558", OffsetMax = "-12.644 -77.176" }
-                }
-                });
-
-                AddInterface("UI_Chat_Context_Visual_Nick", container.ToJson());
-            }
-            
-                        private void BuildingStaticContext()
-            {
-                Configuration.ControllerParameters Controller = config.ControllerParameter;
-                if (Controller == null)
-                {
-                    _.PrintWarning("Ошибка генерации интерфейса, null значение в конфигурации, свяжитесь с разработчиком");
-                    return;
-                }
-                CuiElementContainer container = new CuiElementContainer();
-
-                container.Add(new CuiPanel
-                {
-                    CursorEnabled = true,
-                    RectTransform = { AnchorMin = "1 0.5", AnchorMax = "1 0.5", OffsetMin = "-379 -217", OffsetMax = "-31 217" },
-                    Image = { Color = "0 0 0 0" }
-                }, "Overlay", UI_Chat_Context);
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "1000 1000", OffsetMax = "-1000 -1000" },
-                    Button = { Close = UI_Chat_Context, Color = "0 0 0 0.5" },
-                    Text = { Text = "" }
-                }, UI_Chat_Context, "CLOSE_UI_Chat_Context_FullScreen");
-
-                container.Add(new CuiElement
-                {
-                    Name = "ImageContext",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = "%IMG_BACKGROUND%" },
-                    new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "TitleLabel",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiTextComponent { Text = "%TITLE%", Font = "robotocondensed-regular.ttf", FontSize = 17, Align = TextAnchor.MiddleLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-149.429 166.408", OffsetMax = "-14.788 189.564" }
-                }
-                });
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                container.Add(new CuiElement
-                {
-                    Name = "DescriptionLabel",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiTextComponent { Text = "%SETTING_ELEMENT%", Font = "robotocondensed-regular.ttf", FontSize = 8, Align = TextAnchor.MiddleLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-149.429 112.021514", OffsetMax = "152.881 131.787" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "InformationLabel",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiTextComponent { Text = "%INFORMATION%", Font = "robotocondensed-regular.ttf", FontSize = 8, Align = TextAnchor.MiddleLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-149.429 -53.432", OffsetMax = "-32.905 -39.808" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "InformationIcon",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_INFORMATION_ICON") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-14.788 -52.12", OffsetMax = "-3.788 -41.12" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "SettingLabel",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiTextComponent { Text = "%SETTINGS%", Font = "robotocondensed-regular.ttf", FontSize = 8, Align = TextAnchor.MiddleLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "11.075 -53.432", OffsetMax = "126.125 -39.808" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "SettingIcon",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_SETTING_ICON") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "141.88 -52.12", OffsetMax = "152.88 -41.12" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "SettingPM",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiTextComponent { Text = "%SETTINGS_PM%", Font = "robotocondensed-regular.ttf", FontSize = 8, Align = TextAnchor.MiddleLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "11.075 -70.712", OffsetMax = "126.125 -57.088" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "SettingAlertChat",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiTextComponent { Text = "%SETTINGS_ALERT%", Font = "robotocondensed-regular.ttf", FontSize = 8, Align = TextAnchor.MiddleLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "11.075 -82.412", OffsetMax = "126.125 -68.788" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "SettingNoticyChat",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiTextComponent { Text = "%SETTINGS_ALERT_PM%", Font = "robotocondensed-regular.ttf", FontSize = 8, Align = TextAnchor.MiddleLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "11.075 -94.412", OffsetMax = "126.125 -80.788" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "SettingSoundAlert",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiTextComponent { Text = "%SETTINGS_SOUNDS%", Font = "robotocondensed-regular.ttf", FontSize = 8, Align = TextAnchor.MiddleLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "11.075 -106.412", OffsetMax = "126.125 -92.788" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "MuteStatus",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiTextComponent { Text = "%MUTE_STATUS_PLAYER%", Font = "robotocondensed-regular.ttf", FontSize = 11, Align = TextAnchor.MiddleCenter, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-143.174 -131.59", OffsetMax = "-120.611 -114.967" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "MuteStatusTitle",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiTextComponent { Text = "%MUTE_STATUS_TITLE%", Font = "robotocondensed-regular.ttf", FontSize = 7, Align = TextAnchor.MiddleCenter, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-143.174 -141.429", OffsetMax = "-89.127 -132.508" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "CountIgnored",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiTextComponent { Text = "%IGNORED_STATUS_COUNT%", Font = "robotocondensed-regular.ttf", FontSize = 7, Align = TextAnchor.UpperLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-66.98 -131.715", OffsetMax = "-11.09 -116.831" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "IgonoredTitle",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiTextComponent { Text = "%IGNORED_STATUS_TITLE%", Font = "robotocondensed-regular.ttf", FontSize = 7, Align = TextAnchor.UpperLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-66.98 -142.04", OffsetMax = "-19.967 -132.537" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "IgnoredIcon",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_IGNORE_INFO_ICON") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-19.483 -115.225", OffsetMax = "-11.762 -107.814" }
-                }
-                });
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Button = { Command = $"newui.cmd action.mute.ignore open {SelectedAction.Ignore}", Color = "0 0 0 0" },
-                    Text = { Text = "" }
-                }, "IgnoredIcon", "CLOSE_IGNORED");
-
-                container.Add(new CuiElement
-                {
-                    Name = "TitleNickPanel",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiTextComponent { Text = "%NICK_DISPLAY_TITLE%", Font = "robotocondensed-regular.ttf", FontSize = 10, Align = TextAnchor.MiddleLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-135.769 -78.878", OffsetMax = "-85.632 -64.613" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "NickTitle",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiTextComponent { Text = "%SLIDER_NICK_COLOR_TITLE%", Font = "robotocondensed-regular.ttf", FontSize = 10, Align = TextAnchor.MiddleLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "22.591 76.362", OffsetMax = "80.629 92.278" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "ChatMessageTitle",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiTextComponent { Text = "%SLIDER_MESSAGE_COLOR_TITLE%", Font = "robotocondensed-regular.ttf", FontSize = 10, Align = TextAnchor.MiddleLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-136.591 9.362", OffsetMax = "-78.045 24.278" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "PrefixTitle",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiTextComponent { Text = "%SLIDER_PREFIX_TITLE%", Font = "robotocondensed-regular.ttf", FontSize = 10, Align = TextAnchor.MiddleLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-136.591 77.362", OffsetMax = "-89.949 93.278" }
-                }
-                });
-
-
-                container.Add(new CuiElement
-                {
-                    Name = "RankTitle",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                        new CuiTextComponent { Text = "%SLIDER_IQRANK_TITLE%", Font = "robotocondensed-regular.ttf", FontSize = 10, Align = TextAnchor.MiddleLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "22.825 9.242", OffsetMax = "81.375 25.158" }
-                    }
-                });
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "123.62 166", OffsetMax = "153.62 196" },
-                    Button = { Close = UI_Chat_Context, Color = "0 0 0 0" },
-                    Text = { Text = "" }
-                }, UI_Chat_Context, "CLOSE_UI_Chat_Context");
-
-                AddInterface("UI_Chat_Context", container.ToJson());
-            }
-
-            
-                        private void BuildingCheckBox()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-
-                container.Add(new CuiElement
-                {
-                    Name = "%NAME_CHECK_BOX%",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiRawImageComponent { Color = "%COLOR%", Png = _imageUI.GetImage("IQCHAT_ELEMENT_SETTING_CHECK_BOX") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "%OFFSET_MIN%", OffsetMax = "%OFFSET_MAX%" }
-                }
-                });
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Button = { Command = "%COMMAND_TURNED%", Color = "0 0 0 0" },
-                    Text = { Text = "" }
-                }, "%NAME_CHECK_BOX%", "CHECK_BOX_TURNED");
-
-                AddInterface("UI_Chat_Context_CheckBox", container.ToJson());
-            }
-            
-                        private void BuildingSlider()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-                String NameSlider = "%NAME%";
-
-                container.Add(new CuiElement
-                {
-                    Name = NameSlider,
-                    Parent = UI_Chat_Context,
-                    Components = {
-                            new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_ELEMENT_SLIDER_ICON") },
-                            new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "%OFFSET_MIN%" , OffsetMax = "%OFFSET_MAX%"  }
-                        }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "Left",
-                    Parent = NameSlider,
-                    Components = {
-                        new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_ELEMENT_SLIDER_LEFT_ICON") },
-                        new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-53.9 -4.5", OffsetMax = "-48.9 4.5" }
-                    }
-                });
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Button = { Command = "%COMMAND_LEFT_SLIDE%", Color = "0 0 0 0" },
-                    Text = { Text = "" }
-                }, "Left", "LEFT_SLIDER_BTN");
-
-                container.Add(new CuiElement
-                {
-                    Name = "Right",
-                    Parent = NameSlider,
-                    Components = {
-                        new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_ELEMENT_SLIDER_RIGHT_ICON") },
-                        new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "48.92 -4.5", OffsetMax = "53.92 4.5" }
-                    }
-                });
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Button = { Command = "%COMMAND_RIGHT_SLIDE%", Color = "0 0 0 0" },
-                    Text = { Text = "" }
-                }, "Right", "RIGHT_SLIDER_BTN");
-
-                AddInterface("UI_Chat_Slider", container.ToJson());
-            }
-            private void BuildingSliderUpdateArgument()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-                String ParentSlider = "%PARENT%";
-                String NameArgument = "%NAME%";
-
-                container.Add(new CuiElement
-                {
-                    Name = NameArgument,
-                    Parent = ParentSlider,
-                    Components = {
-                    new CuiTextComponent { Text = "%ARGUMENT%", Font = "robotocondensed-regular.ttf", FontSize = 9, Align = TextAnchor.MiddleCenter, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-41.929 -6.801", OffsetMax = "41.929 6.801" }
-                }
-                });
-
-                AddInterface("UI_Chat_Slider_Update_Argument", container.ToJson());
-            }
-            
-            
-                        private void BuildingMuteAndIgnore()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-
-                container.Add(new CuiElement
-                {
-                    Name = "MuteAndIgnoredPanel",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_MUTE_AND_IGNORE_PANEL")},
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-1007.864 -220.114", OffsetMax = "-167.374 219.063" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "TitlesPanel",
-                    Parent = "MuteAndIgnoredPanel",
-                    Components = {
-                    new CuiTextComponent { Text = "%TITLE%", Font = "robotocondensed-regular.ttf", FontSize = 20, Align = TextAnchor.MiddleRight, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "60.217 164.031", OffsetMax = "356.114 190.962" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "IconPanel",
-                    Parent = "MuteAndIgnoredPanel",
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_MUTE_AND_IGNORE_ICON")},
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "357.5 170", OffsetMax = "373.5 185"  }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "SearchPanel",
-                    Parent = "MuteAndIgnoredPanel",
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_MUTE_AND_IGNORE_SEARCH")},
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-385.8 161.244", OffsetMax = "-186.349 192.58" }
-                }
-                });
-
-                string SearchName = "";
-
-                container.Add(new CuiElement
-                {
-                    Parent = "SearchPanel",
-                    Name = "SearchPanel" + ".Input.Current",
-                    Components =
-                {
-                    new CuiInputFieldComponent { Text = SearchName, FontSize = 14,Command = $"newui.cmd action.mute.ignore search.controller %ACTION_TYPE% {SearchName}", Align = TextAnchor.MiddleCenter, Color = "1 1 1 0.5", CharsLimit = 15},
-                    new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "PanelPages",
-                    Parent = "MuteAndIgnoredPanel",
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_MUTE_AND_IGNORE_PAGE_PANEL")},
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-179.196 161.242", OffsetMax = "-121.119 192.578" }
-                }
-                });
-
-                AddInterface("UI_Chat_Mute_And_Ignore", container.ToJson());
-            }
-
-            private void BuildingMuteAndIgnorePlayerPanel()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-
-                container.Add(new CuiPanel
-                {
-                    CursorEnabled = true,
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0.85" },
-                    Image = { Color = "0 0 0 0" }
-                }, "MuteAndIgnoredPanel", "MuteIgnorePanelContent");
-
-                AddInterface("UI_Chat_Mute_And_Ignore_Panel_Content", container.ToJson());
-            }
-            private void BuildingMuteAndIgnorePlayer()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-
-                container.Add(new CuiElement
-                {
-                    Name = "PANEL_PLAYER",
-                    Parent = "MuteIgnorePanelContent",
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_MUTE_AND_IGNORE_PLAYER") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "%OFFSET_MIN%", OffsetMax = "%OFFSET_MAX%" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "NickName",
-                    Parent = "PANEL_PLAYER",
-                    Components = {
-                    new CuiTextComponent { Text = "%DISPLAY_NAME%", Font = "robotocondensed-regular.ttf", FontSize = 12, Align = TextAnchor.MiddleLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-77.391 -17.245", OffsetMax = "91.582 17.244" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "StatusPanel",
-                    Parent = "PANEL_PLAYER",
-                    Components = {
-                    new CuiRawImageComponent { Color = "%COLOR%", Png = _imageUI.GetImage("IQCHAT_MUTE_AND_IGNORE_PLAYER_STATUS") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-92.231 -11.655", OffsetMax = "-87.503 10.44" }
-                }
-                });
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Button = { Command = "%COMMAND_ACTION%", Color = "0 0 0 0" },
-                    Text = { Text = "" }
-                }, "PANEL_PLAYER");
-
-                AddInterface("UI_Chat_Mute_And_Ignore_Player", container.ToJson());
-            }
-            private void BuildingMuteAndIgnorePages()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-
-                container.Add(new CuiElement
-                {
-                    Name = "PageCount",
-                    Parent = "PanelPages",
-                    Components = {
-                    new CuiTextComponent { Text = "%PAGE%", Font = "robotocondensed-regular.ttf", FontSize = 14, Align = TextAnchor.MiddleCenter, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-11.03 -15.668", OffsetMax = "11.03 15.668" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "LeftPage",
-                    Parent = "PanelPages",
-                    Components = {
-                    new CuiRawImageComponent { Color = "%COLOR_LEFT%", Png = _imageUI.GetImage("IQCHAT_ELEMENT_SLIDER_LEFT_ICON") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-18 -7", OffsetMax = "-13 6" }
-                }
-                });
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Button = { Command = "%COMMAND_LEFT%", Color = "0 0 0 0" },
-                    Text = { Text = "" }
-                }, "LeftPage");
-
-                container.Add(new CuiElement
-                {
-                    Name = "RightPage",
-                    Parent = "PanelPages",
-                    Components = {
-                    new CuiRawImageComponent { Color = "%COLOR_RIGHT%", Png = _imageUI.GetImage("IQCHAT_ELEMENT_SLIDER_RIGHT_ICON") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "14 -7", OffsetMax = "19 6" }
-                }
-                });
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Button = { Command = "%COMMAND_RIGHT%", Color = "0 0 0 0" },
-                    Text = { Text = "" }
-                }, "RightPage");
-
-                AddInterface("UI_Chat_Mute_And_Ignore_Pages", container.ToJson());
-            }
-
-            
-                        private void BuildingMuteAndIgnorePanelAlert()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-
-                container.Add(new CuiPanel
-                {
-                    CursorEnabled = true,
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Image = { Color = "0 0 0 0.25", Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat" }
-                }, "Overlay", "MUTE_AND_IGNORE_PANEL_ALERT");
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Button = { Close = "MUTE_AND_IGNORE_PANEL_ALERT", Color = "0 0 0 0" },
-                    Text = { Text = "" }
-                }, "MUTE_AND_IGNORE_PANEL_ALERT");
-
-                AddInterface("UI_Chat_Mute_And_Ignore_Alert_Panel", container.ToJson());
-            }
-
-            
-            private void BuildingMuteAlert()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-
-                container.Add(new CuiElement
-                {
-                    Name = "AlertMute",
-                    Parent = "MUTE_AND_IGNORE_PANEL_ALERT",
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_MUTE_ALERT_PANEL") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-199.832 -274.669", OffsetMax = "199.832 274.669" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "AlertMuteIcon",
-                    Parent = "AlertMute",
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_MUTE_ALERT_ICON") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-67 204.8", OffsetMax = "67 339.8" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "AlertMuteTitles",
-                    Parent = "AlertMute",
-                    Components = {
-                    new CuiTextComponent { Text = "%TITLE%", Font = "robotocondensed-regular.ttf", FontSize = 25, Align = TextAnchor.MiddleCenter, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-199.828 142.57", OffsetMax = "199.832 179.43" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "AlertMuteTakeChat",
-                    Parent = "AlertMute",
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1",Png = _imageUI.GetImage("IQCHAT_IGNORE_ALERT_BUTTON_YES") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-99.998 87.944", OffsetMax = "100.002 117.944" }
-                }
-                });
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Button = { Command = "%COMMAND_TAKE_ACTION_MUTE_CHAT%", Color = "0 0 0 0" },
-                    Text = { Text = "%BUTTON_TAKE_CHAT_ACTION%", Align = TextAnchor.MiddleCenter, FontSize = 18, Color = "0.1294118 0.145098 0.1647059 1" }
-                }, "AlertMuteTakeChat", "BUTTON_TAKE_CHAT");
-
-                container.Add(new CuiElement
-                {
-                    Name = "AlertMuteTakeVoice",
-                    Parent = "AlertMute",
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1",Png = _imageUI.GetImage("IQCHAT_IGNORE_ALERT_BUTTON_YES") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-100 49.70", OffsetMax = "100 79.70" } //
-                }
-                });
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Button = { Command = "%COMMAND_TAKE_ACTION_MUTE_VOICE%", Color = "0 0 0 0" },
-                    Text = { Text = "%BUTTON_TAKE_VOICE_ACTION%", Align = TextAnchor.MiddleCenter, FontSize = 18, Color = "0.1294118 0.145098 0.1647059 1" }
-                }, "AlertMuteTakeVoice", "BUTTON_TAKE_VOICE");
-
-                AddInterface("UI_Chat_Mute_Alert", container.ToJson());
-            }
-            private void BuildingMuteAlert_DropList_Title()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-
-                container.Add(new CuiElement
-                {
-                    Name = "AlertMuteTitleReason",
-                    Parent = "AlertMute",
-                    Components = {
-                    new CuiTextComponent { Text = "%TITLE%", Font = "robotocondensed-regular.ttf", FontSize = 22, Align = TextAnchor.MiddleCenter, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-199.828 -9.430", OffsetMax = "199.832 27.430" }
-                }
-                });
-
-                container.Add(new CuiPanel
-                {
-                    CursorEnabled = false,
-                    Image = { Color = "1 1 1 0" },
-                    RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-147.497 -265.5440", OffsetMax = "147.503 -24.70" }
-                }, "AlertMute", "PanelMuteReason");
-
-                AddInterface("UI_Chat_Mute_Alert_DropList_Title", container.ToJson());
-            }
-
-            private void BuildingMuteAlert_DropList_Reason()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-
-                container.Add(new CuiElement
-                {
-                    Name = "Reason",
-                    Parent = "PanelMuteReason",
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_MUTE_ALERT_PANEL_REASON")},
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "%OFFSET_MIN%", OffsetMax = "%OFFSET_MAX%" }
-                }
-                });
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Button = { Command = "%COMMAND_REASON%", Color = "0 0 0 0" },
-                    Text = { Text = "%REASON%", Align = TextAnchor.MiddleCenter, FontSize = 13, Color = "1 1 1 1" }
-                }, "Reason");
-
-                AddInterface("UI_Chat_Mute_Alert_DropList_Reason", container.ToJson());
-            }
-            
-                        private void BuildingIgnoreAlert()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-
-                container.Add(new CuiElement
-                {
-                    Name = "AlertIgnore",
-                    Parent = "MUTE_AND_IGNORE_PANEL_ALERT",
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_IGNORE_ALERT_PANEL") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-236.5 -134", OffsetMax = "236.5 134" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "AlertIgnoreIcon",
-                    Parent = "AlertIgnore",
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_IGNORE_ALERT_ICON") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-66.5 64.8", OffsetMax = "66.5 198.8" }
-                }
-                });
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                container.Add(new CuiElement
-                {
-                    Name = "AlertIgnoreTitle",
-                    Parent = "AlertIgnore",
-                    Components = {
-                    new CuiTextComponent { Text = "%TITLE%", Font = "robotocondensed-regular.ttf", FontSize = 22, Align = TextAnchor.UpperCenter, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-231 -55.00", OffsetMax = "229.421 33.98514" } 
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "AlertIgnoreYes",
-                    Parent = "AlertIgnore",
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_IGNORE_ALERT_BUTTON_YES") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-178 -115", OffsetMax = "-22 -77" }
-                }
-                });
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Button = { Close = "MUTE_AND_IGNORE_PANEL_ALERT", Command = "%COMMAND%", Color = "0 0 0 0" },
-                    Text = { Text = "%BUTTON_YES%", Align = TextAnchor.MiddleCenter, FontSize = 18, Color = "0.1294118 0.145098 0.1647059 1" }
-                }, "AlertIgnoreYes", "BUTTON_YES");
-
-                container.Add(new CuiElement
-                {
-                    Name = "AlertIgnoreNo",
-                    Parent = "AlertIgnore",
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_IGNORE_ALERT_BUTTON_NO") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "22 -115", OffsetMax = "178 -77" }
-                }
-                });
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Button = { Close = "MUTE_AND_IGNORE_PANEL_ALERT", Color = "0 0 0 0" },
-                    Text = { Text = "%BUTTON_NO%", Align = TextAnchor.MiddleCenter, FontSize = 18 }
-                }, "AlertIgnoreNo", "BUTTON_NO");
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                AddInterface("UI_Chat_Ignore_Alert", container.ToJson());
-            }
-            
-            
-            
-            
-            private void BuildingDropList()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-
-                container.Add(new CuiElement
-                {
-                    Name = "DropListIcon",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                            new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_ELEMENT_PREFIX_MULTI_TAKE_ICON")},
-                      new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "%OFFSET_MIN%", OffsetMax = "%OFFSET_MAX%" }
-                        }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "DropListDescription",
-                    Parent = "DropListIcon",
-                    Components = {
-                            new CuiTextComponent { Text = "%TITLE%", Font = "robotocondensed-regular.ttf", FontSize = 8, Align = TextAnchor.MiddleLeft, Color = "1 1 1 1" },
-                            new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-105.5 -13.948", OffsetMax = "-42.615 1.725" }
-                        }
-                });
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Button = { Command = "%BUTTON_DROP_LIST_CMD%", Color = "0 0 0 0" },
-                    Text = { Text = "" }
-                }, "DropListIcon", "DropListIcon_Button");
-
-                AddInterface("UI_Chat_DropList", container.ToJson());
-            }
-
-            private void BuildingOpenDropList()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-
-                container.Add(new CuiElement
-                {
-                    Name = "OpenDropList",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_ELEMENT_DROP_LIST_OPEN_ICON")},
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-149.429 -17.38", OffsetMax = "155.093 109.1" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "DropListName",
-                    Parent = "OpenDropList",
-                    Components = {
-                    new CuiTextComponent { Text = "%TITLE%", Font = "robotocondensed-regular.ttf", FontSize = 11, Align = TextAnchor.UpperLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-140.329 44.5", OffsetMax = "-40.329 58.312" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "DropListDescription",
-                    Parent = "OpenDropList",
-                    Components = {
-                    new CuiTextComponent { Text = "%DESCRIPTION%", Font = "robotocondensed-regular.ttf", FontSize = 8, Align = TextAnchor.UpperLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-140.329 32.993", OffsetMax = "-40.329 42.77" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "DropListClose",
-                    Parent = "OpenDropList",
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_ELEMENT_PREFIX_MULTI_TAKE_ICON") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "113 32.2", OffsetMax = "145 56.2" }
-                }
-                });
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Button = { Close = "OpenDropList", Color = "0 0 0 0" },
-                    Text = { Text = "" }
-                }, "DropListClose", "DropListClose_Button");
-
-                container.Add(new CuiElement
-                {
-                    Name = "DropListPageRight",
-                    Parent = "OpenDropList",
-                    Components = {
-                    new CuiRawImageComponent { Color = "%COLOR_RIGHT%", Png = _imageUI.GetImage("IQCHAT_ELEMENT_SLIDER_RIGHT_ICON") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "100 38", OffsetMax = "105.2 48" }
-                }
-                });
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Button = { Command = "%NEXT_BTN%", Color = "0 0 0 0" },
-                    Text = { Text = "" }
-                }, "DropListPageRight", "DropListPageRight_Button");
-
-                container.Add(new CuiElement
-                {
-                    Name = "DropListPageLeft",
-                    Parent = "OpenDropList",
-                    Components = {
-                    new CuiRawImageComponent { Color ="%COLOR_LEFT%", Png = _imageUI.GetImage("IQCHAT_ELEMENT_SLIDER_LEFT_ICON") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "86 38", OffsetMax = "91.2 48" }
-                }
-                });
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                    Button = { Command = "%BACK_BTN%", Color = "0 0 0 0" },
-                    Text = { Text = "" }
-                }, "DropListPageLeft", "DropListPageLeft_Button");
-
-                AddInterface("UI_Chat_OpenDropList", container.ToJson());
-            }
-
-            private void BuildingElementDropList()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-                String Name = "ArgumentDropList_%COUNT%";
-
-                container.Add(new CuiElement
-                {
-                    Name = Name,
-                    Parent = "OpenDropList",
-                    Components = {
-                    new CuiRawImageComponent { FadeIn = 0.3f, Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_ELEMENT_DROP_LIST_OPEN_ARGUMENT_ICON") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "%OFFSET_MIN%", OffsetMax = "%OFFSET_MAX%" }
-                }
-                });
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-37.529 -12.843", OffsetMax = "37.528 12.842" },
-                    Button = { FadeIn = 0.3f, Command = "%TAKE_COMMAND_ARGUMENT%", Color = "0 0 0 0" },
-                    Text = { FadeIn = 0.3f, Text = "%ARGUMENT%", Font = "robotocondensed-regular.ttf", FontSize = 9, Align = TextAnchor.MiddleCenter, Color = "1 1 1 1" }
-                }, Name, "ArgumentButton");
-
-                AddInterface("UI_Chat_OpenDropListArgument", container.ToJson());
-            }
-
-            private void BuildingElementDropListTakeLine()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-                String Parent = "ArgumentDropList_%COUNT%";
-
-                container.Add(new CuiElement
-                {
-                    Name = "TAKED_INFO_%COUNT%",
-                    Parent = Parent,
-                    Components = {
-                    new CuiRawImageComponent { Color = "0.3098039 0.2745098 0.572549 1", Png = _imageUI.GetImage("IQCHAT_ELEMENT_DROP_LIST_OPEN_TAKED") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-25.404 -17.357", OffsetMax = "25.403 -1.584" }
-                }
-                });
-
-                AddInterface("UI_Chat_OpenDropListArgument_Taked", container.ToJson());
-            }
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            
-                        private void BuildingModerationStatic()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-
-                container.Add(new CuiElement
-                {
-                    Name = "ModerationLabel",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiTextComponent { Text = "%TITLE%", Font = "robotocondensed-regular.ttf", FontSize = 8, Align = TextAnchor.MiddleLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "11.075 -126.612", OffsetMax = "126.125 -112.988" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "ModerationIcon",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_MODERATION_ICON") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "141.88 -125.3", OffsetMax = "152.88 -114.3" }
-                }
-                });
-
-
-                container.Add(new CuiElement
-                {
-                    Name = "ModeratorMuteMenu",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_ELEMENT_PANEL_ICON")},
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "11.071 -144.188", OffsetMax = "152.881 -129.752" }
-                }
-                });
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0.95" },
-                    Button = { Command = "%COMMAND_MUTE_MENU%", Color = "0 0 0 0" },
-                    Text = { Text = "%TEXT_MUTE_MENU%", FontSize = 9, Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf" }
-                }, "ModeratorMuteMenu", "ModeratorMuteMenu_Btn");
-
-
-                AddInterface("UI_Chat_Moderation", container.ToJson());
-            }
-            private void BuildingMuteAllChat()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-
-                container.Add(new CuiElement
-                {
-                    Name = "ModeratorMuteAllChat",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_ELEMENT_PANEL_ICON") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "11.07 -161.818", OffsetMax = "152.88 -147.382" }
-                }
-                });
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0.95" },
-                    Button = { Command = "%COMMAND_MUTE_ALLCHAT%", Color = "0 0 0 0" },
-                    Text = { Text = "%TEXT_MUTE_ALLCHAT%", FontSize = 9, Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf" }
-                }, "ModeratorMuteAllChat", "ModeratorMuteAllChat_Btn");
-
-                AddInterface("UI_Chat_Administation_AllChat", container.ToJson());
-            }
-            private void BuildingMuteAllVoice()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-
-                container.Add(new CuiElement
-                {
-                    Name = "ModeratorMuteAllVoice",
-                    Parent = UI_Chat_Context,
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_ELEMENT_PANEL_ICON") },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "11.075 -179.448", OffsetMax = "152.885 -165.012" }
-                }
-                });
-
-                container.Add(new CuiButton
-                {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0.95" },
-                    Button = { Command = "%COMMAND_MUTE_ALLVOICE%", Color = "0 0 0 0" },
-                    Text = { Text = "%TEXT_MUTE_ALLVOICE%", FontSize = 9, Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf" }
-                }, "ModeratorMuteAllVoice", "ModeratorMuteAllVoice_Btn");
-
-                AddInterface("UI_Chat_Administation_AllVoce", container.ToJson());
-            }
-
-            
-            
-                        private void BuildingAlertUI()
-            {
-                CuiElementContainer container = new CuiElementContainer();
-
-                container.Add(new CuiElement
-                {
-                    Name = UI_Chat_Alert,
-                    Parent = "Overlay",
-                    Components = {
-                    new CuiRawImageComponent { Color = "1 1 1 1", Png = _imageUI.GetImage("IQCHAT_ALERT_PANEL") },
-                    new CuiRectTransformComponent { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = "0 -136.5", OffsetMax = "434 -51.5" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "AlertTitle",
-                    Parent = UI_Chat_Alert,
-                    Components = {
-                    new CuiTextComponent { Text = "<b>%TITLE%</b>", Font = "robotocondensed-bold.ttf", FontSize = 16, Align = TextAnchor.MiddleLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-184.193 9.119", OffsetMax = "189.223 30.925" }
-                }
-                });
-
-                container.Add(new CuiElement
-                {
-                    Name = "AlertText",
-                    Parent = UI_Chat_Alert,
-                    Components = {
-                    new CuiTextComponent { Text = "%DESCRIPTION%", Font = "robotocondensed-regular.ttf", FontSize = 12, Align = TextAnchor.MiddleLeft, Color = "1 1 1 1" },
-                    new CuiRectTransformComponent { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-184.193 -27.133", OffsetMax = "189.223 9.119" }
-                }
-                });
-
-                AddInterface("UI_Chat_Alert", container.ToJson());
-            }
-                    }
-
-        private object OnServerMessage(String message, String name)
-        {
-            if (config.ControllerMessages.TurnedFunc.HideAdminGave)
+            if (config.MessageSetting.HideAdminGave)
                 if (message.Contains("gave") && name == "SERVER")
                     return true;
             return null;
         }
-        String API_GET_DEFAULT_PREFIX() => config.ControllerConnect.SetupDefaults.PrefixDefault;
-
-                
-        
-        private String XLevel_GetLevel(BasePlayer player)
+        void OnUserPermissionGranted(string id, string permName) => AutoSetupData(id, permName);
+        private void OnUserGroupAdded(string id, string groupName)
         {
-            if (!XLevels || !config.ReferenceSetting.XLevelsSettings.UseXLevels) return String.Empty;
-            String level = GetLang("XLEVELS_SYNTAX_PREFIX", player.UserIDString, (Int32)XLevels?.CallHook("API_GetLevel", player));
-            
-            Object resultColorMessage = IsGradientColorValue(config.ReferenceSetting.XLevelsSettings.colorTag);
-            if (resultColorMessage is List<String> gradientColors)
-                level = ApplyGradientToText(level, gradientColors);
-            else level = $"<color={config.ReferenceSetting.XLevelsSettings.colorTag}>{level}</color>";
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            return level;
+            var PermissionsGroup = permission.GetGroupPermissions(groupName);
+            if (PermissionsGroup == null) return;
+            foreach (var permName in PermissionsGroup)
+                AutoSetupData(id, permName); 
         }
-
-                private void DrawUI_IQChat_Update_DisplayName(BasePlayer player)
+        void OnUserPermissionRevoked(string id, string permName) => AutoReturnDefaultData(id, permName);
+        void OnUserGroupRemoved(string id, string groupName)
         {
-            String InterfaceVisualNick = InterfaceBuilder.GetInterface("UI_Chat_Context_Visual_Nick");
-            User Info = UserInformation[player.userID];
-            Configuration.ControllerParameters Controller = config.ControllerParameter;
-            if (Info == null || InterfaceVisualNick == null || Controller == null) return;
+            var PermissionsGroup = permission.GetGroupPermissions(groupName);
+            if (PermissionsGroup == null) return;
+            foreach (var permName in PermissionsGroup)
+                AutoReturnDefaultData(id, permName);
+        }
+        object OnPlayerVoice(BasePlayer player, Byte[] data)
+        {
+            var DataPlayer = ChatSettingUser[player.userID];
+            bool IsMuted = DataPlayer.MuteVoiceTime > CurrentTime() ? true : false;
+            if (IsMuted)
+                return false;
+            return null;
+        }
+        void SynhModular() => IQModalMenuConnected();
+        private void OnServerInitialized()
+        {
+            ReadData();
+            foreach (var p in BasePlayer.activePlayerList)
+                RegisteredDataUser(p);
 
-            String DisplayNick = String.Empty;
+            RegisteredPermissions();
+            BroadcastAuto();
 
-            String Pattern = @"</?size.*?>";
-            // if (Controller.Prefixes.TurnMultiPrefixes) 
-            // {
-            //     if (Info.Info.PrefixList != null && Info.Info.PrefixList.Count != 0)
-            //         DisplayNick += Info.Info.PrefixList.Count > 1 ? $"{(Regex.IsMatch(Info.Info.PrefixList[0], Pattern) ? Regex.Replace(Info.Info.PrefixList[0], Pattern, "") : Info.Info.PrefixList[0])}+{Info.Info.PrefixList.Count - 1}" :
-            //             (Regex.IsMatch(Info.Info.PrefixList[0], Pattern) ? Regex.Replace(Info.Info.PrefixList[0], Pattern, "") : Info.Info.PrefixList[0]);
-            // }
-            // else DisplayNick += Regex.IsMatch(Info.Info.Prefix, Pattern) ? Regex.Replace(Info.Info.Prefix, Pattern, "") : Info.Info.Prefix;
-            //
-            if (Controller.Prefixes.TurnMultiPrefixes)
+            if (IQModalMenu)
+               IQModalMenuConnected();
+        }
+        void OnPlayerConnected(BasePlayer player)
+        {
+            RegisteredDataUser(player);
+            var Alert = config.AlertSettings;
+            if (Alert.ConnectedAlert)
             {
-                if (Info.Info.PrefixList != null && Info.Info.PrefixList.Count != 0)
-                {
-                    if (Info.Info.PrefixList[0] != null && Regex.IsMatch(Info.Info.PrefixList[0], Pattern))
-                        DisplayNick += Regex.Replace(Info.Info.PrefixList[0], Pattern, "");
-                    else
-                        DisplayNick += Info.Info.PrefixList[0];
+                if (!Alert.ConnectedAlertAdmin)
+                    if (player.IsAdmin) return;
 
-                    DisplayNick += Info.Info.PrefixList.Count > 1 ? $"+{Info.Info.PrefixList.Count - 1}" : string.Empty;
+                string Avatar = Alert.ConnectedAvatarUse ? player.UserIDString : "";
+                string Message = string.Empty;
+                if (config.AlertSettings.ConnectedWorld)
+                {
+                    webrequest.Enqueue("http://ip-api.com/json/" + player.net.connection.ipaddress.Split(':')[0], null, (code, response) =>
+                    {
+                        if (code != 200 || response == null)
+                            return;
+
+                        string country = JsonConvert.DeserializeObject<Response>(response).Country;
+
+                        if (Alert.ConnectionAlertRandom)
+                        {
+                            sb.Clear();
+                            int RandomIndex = UnityEngine.Random.Range(0, Alert.RandomConnectionAlert.Count);
+                            Message = sb.AppendFormat(Alert.RandomConnectionAlert[RandomIndex], player.displayName, country).ToString();
+                        }
+                        else Message = GetLang("WELCOME_PLAYER_WORLD", player.UserIDString, player.displayName, country);
+                        ReplyBroadcast(Message, "", Avatar);
+                    }, this);
+                }
+                else
+                {
+                    if (Alert.ConnectionAlertRandom)
+                    {
+                        sb.Clear();
+                        int RandomIndex = UnityEngine.Random.Range(0, Alert.RandomConnectionAlert.Count);
+                        Message = sb.AppendFormat(Alert.RandomConnectionAlert[RandomIndex], player.displayName).ToString();
+                    }
+                    else Message = GetLang("WELCOME_PLAYER", player.UserIDString, player.displayName);
+                    ReplyBroadcast(Message, "", Avatar); 
                 }
             }
-            else
+            if (Alert.WelcomeMessageUse)
             {
-                if (Info.Info.Prefix != null && Regex.IsMatch(Info.Info.Prefix, Pattern))
-                    DisplayNick += Regex.Replace(Info.Info.Prefix, Pattern, "");
-                else DisplayNick += Info.Info.Prefix;
+                int RandomMessage = UnityEngine.Random.Range(0, Alert.WelcomeMessage.Count);
+                string WelcomeMessage = Alert.WelcomeMessage[RandomMessage];
+                ReplySystem(Chat.ChatChannel.Global, player, WelcomeMessage);
             }
 
-            String DisplayName = player.displayName;
-            String ColorNickPlayer = !String.IsNullOrWhiteSpace(Info.Info.CustomColorNick)
-                ? Info.Info.CustomColorNick
-                : (Info.Info.ColorNick ?? "#ffffff");
-            
-            Object resultColorNick = IsGradientColorValue(ColorNickPlayer);
-            if (resultColorNick is List<String> gradientColors)
-                DisplayName = ApplyGradientToText(DisplayName, gradientColors);
-            else DisplayName = $"<color={ColorNickPlayer}>{DisplayName}</color>";
-            
-            String ChatMessage = GetLang("IQCHAT_CONTEXT_NICK_DISPLAY_MESSAGE", player.UserIDString);
-            String ColorChat = !String.IsNullOrWhiteSpace(Info.Info.CustomColorMessage) ? Info.Info.CustomColorMessage : Info.Info.ColorMessage;
-            Object resultColorChat = IsGradientColorValue(ColorChat);
-            if (resultColorChat is List<String> gradientChatColors)
-                ChatMessage = ApplyGradientToText(ChatMessage, gradientChatColors);
-            else ChatMessage = $"<color={ColorChat}>{ChatMessage}</color>";
-            
-            DisplayNick += $"{DisplayName}: <color={ColorChat ?? "#ffffff"}>{ChatMessage}</color>";
-
-            InterfaceVisualNick = InterfaceVisualNick.Replace("%NICK_DISPLAY%", DisplayNick);
-
-            CuiHelper.DestroyUi(player, InterfaceBuilder.UI_Chat_Context_Visual_Nick);
-            CuiHelper.AddUi(player, InterfaceVisualNick);
+            CheckValidInformation(player);
+        }
+        void Unload()
+        {
+            if (IQModalMenu)
+                IQModalMenuDisconnected();
+            WriteData();
         }
 
-        
-                void OnUserPermissionGranted(string id, string permName) => SetupParametres(id, permName);
-
-        Boolean API_CHECK_VOICE_CHAT(BasePlayer.EncryptedValue<UInt64> ID) => API_CHECK_VOICE_CHAT(ID.Get());
-        public String GetMessages(BasePlayer player, Dictionary<String, List<String>> LanguageMessages)
+        void OnPlayerDisconnected(BasePlayer player, string reason)
         {
-            String LangPlayer = _.lang.GetLanguage(player.UserIDString);
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            if (LanguageMessages.ContainsKey(LangPlayer))
-                return LanguageMessages[LangPlayer].GetRandom();
-            else if (LanguageMessages.ContainsKey("en"))
-                return LanguageMessages["en"].GetRandom();
-            else return LanguageMessages.FirstOrDefault().Value.GetRandom();
-        }
-        public static StringBuilder sb = new StringBuilder();
-        private Boolean TryGetUserIdAsUlong(String userId, out UInt64 userIdAsUlong) => UInt64.TryParse(userId, out userIdAsUlong);
-
-        private Boolean SetMuteFakeUser(String idOrName, Boolean isMuted)
-        {
-            if (!IsReadyIQFakeActive()) return false;
-            return IQFakeActive.Call<Boolean>("MuteAction", idOrName, isMuted);
-        }
-        Int32 API_GET_DEFAULT_SIZE_NICK() => config.ControllerMessages.GeneralSetting.OtherSetting.SizeNick;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-        private void DiscordLoggMuted(BasePlayer Target, MuteType Type, String Reason = null, String TimeBlocked = null, BasePlayer Moderator = null)
-        {
-            Configuration.OtherSettings.General MuteChat = config.OtherSetting.LogsMuted;
-            if (!MuteChat.UseLogged || String.IsNullOrWhiteSpace(MuteChat.Webhooks)) return;
-
-            Configuration.ControllerMute.LoggedFuncion ControllerMuted = config.ControllerMutes.LoggedMute;
-
-            String ActionReason = String.Empty;
-
-            GeneralInformation.RenameInfo RenameSender = GeneralInfo.GetInfoRename(Target.userID);
-
-            UInt64 UserIDModeration = 0;
-            String NickModeration = GetLang("IQCHAT_FUNCED_ALERT_TITLE_SERVER", Target.UserIDString);
-            if (Moderator != null)
+            var Alert = config.AlertSettings;
+            if (Alert.DisconnectedAlert)
             {
-                GeneralInformation.RenameInfo RenameModerator = GeneralInfo.GetInfoRename(Moderator.userID);
+                if (!Alert.DisconnectedAlertAdmin)
+                    if (player.IsAdmin) return;
 
-                UserIDModeration = RenameModerator != null
-                    ? RenameModerator.RenameID == 0 ? Moderator.userID : RenameModerator.RenameID
-                    : Moderator.userID;
-                NickModeration = RenameModerator != null
-                    ? $"{RenameModerator.RenameNick ?? Moderator.displayName}"
-                    : Moderator.displayName;
-            }
-
-            String NickTarget = RenameSender != null ? $"{RenameSender.RenameNick ?? Target.displayName}" : Target.displayName;
-            UInt64 UserIDTarget = RenameSender != null ? RenameSender.RenameID == 0 ? Target.userID : RenameSender.RenameID : Target.userID;
-
-            List<Fields> fields;
-
-            switch (Type)
-            {
-                case MuteType.Chat:
-                    {
-                        if (Reason != null)
-                            ActionReason = LanguageEn ? "Mute chat" : "Блокировка чата";
-                        else ActionReason = LanguageEn ? "Unmute chat" : "Разблокировка чата";
-                        break;
-                    }
-                case MuteType.Voice:
-                    {
-                        if (Reason != null)
-                            ActionReason = LanguageEn ? "Mute voice" : "Блокировка голоса";
-                        else ActionReason = LanguageEn ? "Unmute voice" : "Разблокировка голоса";
-                        break;
-                    }
-                default:
-                    break;
-            }
-            Int32 Color = 0;
-            if (Reason != null)
-            {
-                fields = new List<Fields>
-                        {
-                            new Fields(LanguageEn ? "Nickname of the moderator" : "Ник модератора", NickModeration, true),
-                            new Fields(LanguageEn ? "Steam64ID Moderator" : "Steam64ID модератора", $"{UserIDModeration}", true),
-                            new Fields(LanguageEn ? "Action" : "Действие", ActionReason, false),
-                            new Fields(LanguageEn ? "Reason" : "Причина", Reason, false),
-                            new Fields(LanguageEn ? "Time" : "Время", TimeBlocked, false),
-                            new Fields(LanguageEn ? "Nick blocked" : "Ник заблокированного", NickTarget, true),
-                            new Fields(LanguageEn ? "Steam64ID blocked" : "Steam64ID заблокированного", $"{UserIDTarget}", true),
-                        };
-
-
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                if (ControllerMuted.UseHistoryMessage)
+                string Avatar = Alert.ConnectedAvatarUse ? player.UserIDString : "";
+                string Message = string.Empty;
+                if (Alert.DisconnectedAlertRandom)
                 {
-                    String Messages = GetLastMessage(Target, ControllerMuted.CountHistoryMessage);
-                    if (Messages != null && !String.IsNullOrWhiteSpace(Messages))
-                        fields.Insert(fields.Count, new Fields(LanguageEn ? $"The latter {ControllerMuted.CountHistoryMessage} messages" : $"Последние {ControllerMuted.CountHistoryMessage} сообщений", Messages, false));
+                    sb.Clear();
+                    int RandomIndex = UnityEngine.Random.Range(0, Alert.RandomDisconnectedAlert.Count);
+                    Message = sb.AppendFormat(Alert.RandomDisconnectedAlert[RandomIndex], player.displayName, reason).ToString();
                 }
-
-                Color = 14357781;
-            }
-            else
-            {
-                fields = new List<Fields>
-                        {
-                            new Fields(LanguageEn ? "Nickname of the moderator" : "Ник модератора", NickModeration, true),
-                            new Fields(LanguageEn ? "Steam64ID moderator" : "Steam64ID модератора", $"{UserIDModeration}", true),
-                            new Fields(LanguageEn ? "Action" : "Действие", ActionReason, false),
-                            new Fields(LanguageEn ? "Nick blocked" : "Ник заблокированного", NickTarget, true),
-                            new Fields(LanguageEn ? "Steam64ID blocked" : "Steam64ID заблокированного", $"{UserIDTarget}", true),
-                        };
-                Color = 1432346;
-            }
-
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            FancyMessage newMessage = new FancyMessage(null, false, new FancyMessage.Embeds[1] { new FancyMessage.Embeds(null, Color, fields, new Authors("IQChat Mute-History", null, "https://i.postimg.cc/SshGgy52/xiwsg5m.png", null), null) });
-
-            Request($"{MuteChat.Webhooks}", newMessage.toJSON());
-        }
-        private IEnumerable<T> GetPageOfPlayers<T>(IEnumerable<T> items, Int32 page) => items != null ? items.Skip(18 * page).Take(18) : Enumerable.Empty<T>();
-
-        
-                public Boolean IsNoob(UInt64 userID, Int32 TimeBlocked)
-        {
-            if (UserInformationConnection.ContainsKey(userID))
-                return UserInformationConnection[userID].IsNoob(TimeBlocked);
-            return false;
-        }
-        void API_SEND_PLAYER_CONNECTED(String DisplayName, String country, String userID) 
-        {
-            Configuration.ControllerAlert.PlayerSession AlertSessionPlayer = config.ControllerAlertSetting.PlayerSessionSetting;
-
-            if (AlertSessionPlayer.ConnectedAlert)
-            {
-                String Avatar = AlertSessionPlayer.ConnectedAvatarUse ? userID : String.Empty;
-                if (AlertSessionPlayer.ConnectedWorld)
-                    ReplyBroadcast(null, Avatar, false, "WELCOME_PLAYER_WORLD", DisplayName, country);
-                else ReplyBroadcast(null, Avatar, false, "WELCOME_PLAYER", DisplayName);
+                else Message = config.AlertSettings.DisconnectedReason ? GetLang("LEAVE_PLAYER_REASON", player.UserIDString, player.displayName, reason) : GetLang("LEAVE_PLAYER", player.UserIDString, player.displayName);
+                ReplyBroadcast(Message, "", Avatar);
             }
         }
+        #endregion
 
-        
-        
-        private String XPrison_GetPrefix(BasePlayer player)
-        {
-            if (!XPrison || !config.ReferenceSetting.xPrisonSettings.UseXPrison) return String.Empty;
-            Boolean isPrisonPlayer = (Boolean)XPrison.CallHook("API_IsOnlinePrisoner", player.userID.Get());
-            if (!isPrisonPlayer) return String.Empty;
-            String prefixPrison = (String)XPrison.CallHook("API_GetOnlinePrisonerPrefix", player);
-            if (String.IsNullOrWhiteSpace(prefixPrison)) return String.Empty;
-            String resultPrefix = GetLang("XPRISON_SYNTAX_PREFIX", player.UserIDString, prefixPrison);
-            
-            Object resultColorMessage = IsGradientColorValue(config.ReferenceSetting.xPrisonSettings.colorTag);
-            if (resultColorMessage is List<String> gradientColors)
-                resultPrefix = ApplyGradientToText(resultPrefix, gradientColors);
-            else resultPrefix = $"<color={config.ReferenceSetting.xPrisonSettings.colorTag}>{resultPrefix}</color>";
+        #region DiscordFunc
 
-            return resultPrefix;
-        }
-		   		 		  						  	   		  		 			  		  		  			 		   			
-        
-        private String RemoveLinkText(String text)
-        {
-            String hrefPattern = "([A-Za-z0-9-А-Яа-я]|https?://)[^ ]+\\.(com|lt|net|org|gg|ru|рф|int|info|ru.com|ru.net|com.ru|net.ru|рус|org.ru|moscow|biz|орг|su)";
-            Regex rgx = new Regex(hrefPattern, RegexOptions.IgnoreCase);
-
-            return config.ControllerMessages.Formatting.ControllerNickname.AllowedLinkNick.Contains(rgx.Match(text).Value) ? text : rgx.Replace(text, "").Trim();
-        }
-        List<String> IQRankListKey(ulong userID) => (List<string>)(IQRankSystem?.Call("API_RANK_USER_KEYS", userID));
-        
-        void ReplyBroadcast(String CustomPrefix = null, String CustomAvatar = null, Boolean AdminAlert = false, String LangKey = "", params object[] args)
-        {
-            foreach (BasePlayer p in !AdminAlert ? BasePlayer.activePlayerList.Where(p => UserInformation[p.userID].Settings.TurnBroadcast) : BasePlayer.activePlayerList)
-                ReplySystem(p,GetLang(LangKey, p.UserIDString, args), CustomPrefix, CustomAvatar);
-        }
-
-		   		 		  						  	   		  		 			  		  		  			 		   			
-        
-                public class FancyMessage
+        #region FancyDiscord
+        public class FancyMessage
         {
             public string content { get; set; }
             public bool tts { get; set; }
             public Embeds[] embeds { get; set; }
-		   		 		  						  	   		  		 			  		  		  			 		   			
+
             public class Embeds
             {
                 public string title { get; set; }
@@ -6628,196 +1384,8 @@ namespace Oxide.Plugins
                 this.tts = tts;
                 this.embeds = embeds;
             }
-            
+
             public string toJSON() => JsonConvert.SerializeObject(this);
-        }
-        public Dictionary<UInt64, AntiNoob> UserInformationConnection = new Dictionary<UInt64, AntiNoob>();
-        Boolean API_CHECK_MUTE_CHAT(BasePlayer.EncryptedValue<UInt64> ID) => API_CHECK_MUTE_CHAT(ID.Get());
-
-        [ConsoleCommand("hmute")]
-        void HideMuteConsole(ConsoleSystem.Arg arg)
-        {
-            if (arg.Player() != null)
-                if (!permission.UserHasPermission(arg.Player().UserIDString, PermissionMute)) return;
-
-            if (arg == null || arg.Args == null || arg.Args.Length != 3 || arg.Args.Length > 3)
-            {
-                ConsoleOrPrintMessage(arg.Player(),
-                    LanguageEn
-                        ? "Invalid syntax, use : hmute Steam64ID Reason Time (seconds)"
-                        : "Неверный синтаксис,используйте : hmute Steam64ID Причина Время(секунды)");
-                return;
-            }
-            string NameOrID = arg.Args[0];
-            string Reason = arg.Args[1];
-            Int32 TimeMute = 0;
-            if (!Int32.TryParse(arg.Args[2], out TimeMute))
-            {
-                ConsoleOrPrintMessage(arg.Player(),
-                    LanguageEn ? "Enter the time in numbers!" : "Введите время цифрами!");
-                return;
-            }
-            BasePlayer target = GetPlayerNickOrID(NameOrID);
-            if (target == null)
-            {
-                UInt64 Steam64ID = 0;
-                if (UInt64.TryParse(NameOrID, out Steam64ID))
-                {
-                    if (UserInformation.ContainsKey(Steam64ID))
-                    {
-                        User Info = UserInformation[Steam64ID];
-                        if (Info == null) return;
-                        if (Info.MuteInfo.IsMute(MuteType.Chat))
-                        {
-                            ConsoleOrPrintMessage(arg.Player(),
-                                LanguageEn ? "The player already has a chat lock" : "Игрок уже имеет блокировку чата");
-                            return;
-                        }
-
-                        Info.MuteInfo.SetMute(MuteType.Chat, TimeMute);
-
-                        ConsoleOrPrintMessage(arg.Player(),
-                            LanguageEn ? "Chat blocking issued to offline player" : "Блокировка чата выдана offline-игроку");
-                        return;
-                    }
-                    else
-                    {
-                        ConsoleOrPrintMessage(arg.Player(),
-                            LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                        return;
-                    }
-                }
-                else
-                {
-                    ConsoleOrPrintMessage(arg.Player(),
-                        LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                    return;
-                }
-            }
-
-            MutePlayer(target, MuteType.Chat, 0, arg.Player(), Reason, TimeMute, true, true);
-        }
-
-        
-        
-        private Int32 GetPlayersOnlineShort()
-        {
-            if (IsReadyIQFakeActive())
-            {
-                List<FakePlayer> combinedPlayers = GetCombinedPlayerList();
-                if (combinedPlayers != null)
-                    return GetCombinedPlayerList().Count(fp => !permission.UserHasPermission(fp.userId, PermissionHideOnline));
-            }
-            return BasePlayer.activePlayerList.Count(p => !permission.UserHasPermission(p.UserIDString, PermissionHideOnline));
-        }
-        
-        [ChatCommand("mutevoice")]
-        void MuteVoiceCustomChat(BasePlayer Moderator, string cmd, string[] arg)
-        {
-            if (!permission.UserHasPermission(Moderator.UserIDString, PermissionMute)) return;
-            if (arg == null || arg.Length != 3 || arg.Length > 3)
-            {
-                ReplySystem(Moderator, LanguageEn ? "Invalid syntax, use : mutevoice Steam64ID/Nick Reason Time(seconds)" : "Неверный синтаксис, используйте : mutevoice Steam64ID/Ник Причина Время(секунды)");
-                return;
-            }
-            string NameOrID = arg[0];
-            string Reason = arg[1];
-            Int32 TimeMute = 0;
-            if (!Int32.TryParse(arg[2], out TimeMute))
-            {
-                ReplySystem(Moderator, LanguageEn ? "Enter time in numbers!" : "Введите время цифрами!");
-                return;
-            }
-            
-            if (IsFakeUser(NameOrID))
-            {
-                List<FakePlayer> playerList = GetCombinedPlayerList();
-                if (playerList != null)
-                {
-                    FakePlayer fakeUser = playerList.FirstOrDefault(x => x.userId.Equals(NameOrID) || x.displayName.ToLower().Contains(NameOrID.ToLower()));
-                    if (fakeUser != null)
-                        MutePlayer(null, MuteType.Voice, 0, Moderator, Reason, TimeMute, false, true, fakeUser.userId);
-                }
-                return;
-            }
-            
-            BasePlayer target = GetPlayerNickOrID(NameOrID);
-            if (target == null)
-            {
-                UInt64 Steam64ID = 0;
-                if (UInt64.TryParse(NameOrID, out Steam64ID))
-                {
-                    if (UserInformation.ContainsKey(Steam64ID))
-                    {
-                        User Info = UserInformation[Steam64ID];
-                        if (Info == null) return;
-                        if (Info.MuteInfo.IsMute(MuteType.Voice))
-                        {
-                            ReplySystem(Moderator, LanguageEn ? "The player already has a voice lock" : "Игрок уже имеет блокировку голосового чата");
-                            return;
-                        }
-
-                        Info.MuteInfo.SetMute(MuteType.Voice, TimeMute);
-                        ReplySystem(Moderator, LanguageEn ? "Voice blocking issued to offline player" : "Блокировка глосового чата выдана offline-игроку");
-                        return;
-                    }
-                    else
-                    {
-                        ReplySystem(Moderator, LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                        return;
-                    }
-                }
-                else
-                {
-                    ReplySystem(Moderator, LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                    return;
-                }
-            }
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            MutePlayer(target, MuteType.Voice, 0, Moderator, Reason, TimeMute, false, true);
-        }
-        
-        private Boolean IsFakeUser(String idOrName)
-        {
-            if (!IsReadyIQFakeActive()) return false;
-            return (Boolean)IQFakeActive.Call("IsFakeUser", idOrName);
-        }
-
-        
-                public GeneralInformation GeneralInfo = new GeneralInformation();
-
-        
-                
-        public class FakePlayer
-        {
-            [JsonProperty("userId")] public String userId;
-
-            public Boolean isMuted;
-            [JsonProperty("displayName")] public String displayName;
-        }
-        void API_ALERT_PLAYER(BasePlayer player, String Message, String CustomPrefix = null, String CustomAvatar = null, String CustomHex = null) => ReplySystem(player, Message, CustomPrefix, CustomAvatar, CustomHex);
-        private void DrawUI_IQChat_Mute_Alert_Reasons(BasePlayer player, BasePlayer Target, MuteType Type, UInt64 IDFake = 0)
-        {
-            String Interface = InterfaceBuilder.GetInterface("UI_Chat_Mute_Alert_DropList_Title");
-            if (Interface == null) return;
-
-            Interface = Interface.Replace("%TITLE%", GetLang("IQCHAT_BUTTON_MODERATION_MUTE_MENU_TITLE_ALERT_REASON", player.UserIDString));
-
-            CuiHelper.DestroyUi(player, "AlertMuteTitleReason");
-            CuiHelper.DestroyUi(player, "PanelMuteReason");
-            CuiHelper.AddUi(player, Interface);
-
-            List<Configuration.ControllerMute.Muted> Reasons = Type == MuteType.Chat ? config.ControllerMutes.MuteChatReasons : config.ControllerMutes.MuteVoiceReasons;
-
-            Int32 Y = 0;
-            foreach (Configuration.ControllerMute.Muted Reason in Reasons.Take(6))
-                DrawUI_IQChat_Mute_Alert_Reasons(player, Target, Reason.Reason, Y++, Type, IDFake);
-        }
-        internal class FlooderInfo
-        {
-            public Double Time;
-            public String LastMessage;
-            public Int32 TryFlood;
         }
 
         public class Footer
@@ -6847,338 +1415,19 @@ namespace Oxide.Plugins
                 this.proxy_icon_url = proxy_icon_url;
             }
         }
-        
-        private void DrawUI_IQChat_Mute_And_Ignore(BasePlayer player, SelectedAction Action)
+
+        public class Fields
         {
-            String Interface = InterfaceBuilder.GetInterface("UI_Chat_Mute_And_Ignore");
-            if (Interface == null) return;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            Interface = Interface.Replace("%TITLE%", Action == SelectedAction.Mute ? GetLang("IQCHAT_TITLE_IGNORE_AND_MUTE_MUTED", player.UserIDString) : GetLang("IQCHAT_TITLE_IGNORE_AND_MUTE_IGNORED", player.UserIDString));
-            Interface = Interface.Replace("%ACTION_TYPE%", $"{Action}");
-
-            CuiHelper.DestroyUi(player, "MuteAndIgnoredPanel");
-            CuiHelper.AddUi(player, Interface);
-
-            DrawUI_IQChat_Mute_And_Ignore_Player_Panel(player, Action);
-        }
-
-        
-        [ChatCommand("cnick")]
-        private void ColoredNickSetup(BasePlayer player, String cmd, String[] args)
-        {
-            if (!permission.UserHasPermission(player.UserIDString, PermissionUseCmdCnick)) return;
-            if (player == null)
-                return;
-
-            if (args.Length == 0)
+            public string name { get; set; }
+            public string value { get; set; }
+            public bool inline { get; set; }
+            public Fields(string name, string value, bool inline)
             {
-                ReplySystem(player, GetLang("COMMAND_COLOR_CUSTOM_NOT_ARG", player.UserIDString));
-                return;
-            }
-
-            String color = String.Join("", args);
-            List<String> correctedColors = Pool.GetList<String>();
-
-            correctedColors = ConvertStringToList(color);
-            if (HasInvalidHexColor(correctedColors, out String invalidHex))
-            {
-                ReplySystem(player, GetLang("COMMAND_COLOR_CUSTOM_NOT_HEX", player.UserIDString, invalidHex));
-                return;
-            }
-
-            if (correctedColors.Count > 10)
-                ReplySystem(player, GetLang("COMMAND_COLOR_CUSTOM_MAX_ARGUMENTS", player.UserIDString));
-            
-
-            User User = UserInformation[player.userID];
-            String resultColor = JoinStringList(correctedColors);
-            
-            User.Info.CustomColorNick = resultColor;
-            
-            Pool.FreeList(ref correctedColors);
-            
-            ReplySystem(player, GetLang("COMMAND_COLOR_CUSTOM_ACCESS", player.UserIDString));
-        }
-        
-        private List<FakePlayer> GetCombinedPlayerList()
-        {
-            if (!IsReadyIQFakeActive()) return null;
-            JObject jsonData = IQFakeActive.Call<JObject>("GetListPlayers");
-            
-            if (!jsonData.TryGetValue("players", out JToken playersToken)) return null;
-            List<FakePlayer> playerList = playersToken.ToObject<List<FakePlayer>>();
-            return playerList;
-        }
-
-        
-        private Boolean HasInvalidHexColor(List<String> colorList, out String invalidHex)
-        {
-            foreach (String color in colorList)
-            {
-                if (!IsValidHexColor(color))
-                {
-                    invalidHex = color;
-                    return true;
-                }
-            }
-            
-            invalidHex = String.Empty;
-            return false; 
-        }
-        private void AddHistoryMessage(BasePlayer player, String Message)
-        {
-            if (!LastMessagesChat.ContainsKey(player))
-                LastMessagesChat.Add(player, new List<String> { Message });
-            else LastMessagesChat[player].Add(Message);
-        }
-        
-        
-        private String GetClanTag(BasePlayer.EncryptedValue<UInt64> playerID) => GetClanTag(playerID.Get());
-        void API_SEND_PLAYER_PM(BasePlayer player, string DisplayName, String userID, string Message)
-        {
-            if (!UserInformation.ContainsKey(player.userID)) return;
-            if (!UInt64.TryParse(userID, out UInt64 idSender)) return;
-            if (!UserInformation.ContainsKey(player.userID)) return;
-            if (UserInformation[player.userID].Settings.IsIgnored(idSender)) return;
-            
-            ReplySystem(player, GetLang("COMMAND_PM_SEND_MSG", player.UserIDString, DisplayName, Message));
-
-            if (UserInformation[player.userID].Settings.TurnSound)
-                Effect.server.Run(config.ControllerMessages.TurnedFunc.PMSetting.SoundPM, player.GetNetworkPosition());
-        }
-        private void MigrateDataToNoob()
-        {
-            if (config.ControllerMessages.TurnedFunc.AntiNoobSetting.AntiNoobPM.AntiNoobActivate || config.ControllerMessages.TurnedFunc.AntiNoobSetting.AntiNoobChat.AntiNoobActivate)
-            {
-                if (UserInformationConnection.Count == 0 || UserInformationConnection == null)
-                {
-                    PrintWarning(LanguageEn ? "Migration of old players to Anti-Nub.." : "Миграция старых игроков в Анти-Нуб..");
-                    foreach (KeyValuePair<UInt64, User> InfoUser in UserInformation.Where(x => !UserInformationConnection.ContainsKey(x.Key)))
-                        UserInformationConnection.Add(InfoUser.Key, new AntiNoob { DateConnection = new DateTime(2022, 1, 1) });
-                    PrintWarning(LanguageEn ? "Migration of old players completed" : "Миграция старых игроков завершена");
-                }
+                this.name = name;
+                this.value = value;
+                this.inline = inline;
             }
         }
-        private const String PermissionTranslationIgnore = "iqchat.translationignore";
-        String IQRankGetRank(ulong userID) => (string)(IQRankSystem?.Call("API_GET_RANK_NAME", userID));
-
-        void OnGroupPermissionRevoked(string name, string perm)
-        {
-            String[] PlayerGroups = permission.GetUsersInGroup(name);
-            if (PlayerGroups == null) return;
-
-            foreach (String playerInfo in PlayerGroups)
-            {
-                BasePlayer player = BasePlayer.FindByID(UInt64.Parse(playerInfo.Substring(0, 17)));
-                if (player == null) return;
-
-                RemoveParametres(player.UserIDString, perm);
-            }
-        }
-        [ConsoleCommand("adminalert")]
-        private void AdminAlertConsoleCommand(ConsoleSystem.Arg args)
-        {
-            BasePlayer Sender = args.Player();
-            if (Sender != null)
-                if (!permission.UserHasPermission(Sender.UserIDString, PermissionAlert)) return;
-            Alert(Sender, args.Args, true);
-        }
-        public void AnwserMessage(BasePlayer player, String Message)
-        {
-            Configuration.AnswerMessage Anwser = config.AnswerMessages;
-            if (!Anwser.UseAnswer) return;
-            foreach (KeyValuePair<String, Configuration.LanguageController> Anwsers in Anwser.AnswerMessageList)
-                if (Message.Contains(Anwsers.Key.ToLower()))
-                {
-                    String templateText = GetMessages(player, Anwsers.Value.LanguageMessages);
-                    if(String.IsNullOrWhiteSpace(templateText)) continue;
-                    ReplySystem(player, templateText);
-                }
-        }
-        void WriteData()
-        {
-            Oxide.Core.Interface.Oxide.DataFileSystem.WriteObject("IQSystem/IQChat/Information", GeneralInfo);
-            Oxide.Core.Interface.Oxide.DataFileSystem.WriteObject("IQSystem/IQChat/Users", UserInformation);
-            Oxide.Core.Interface.Oxide.DataFileSystem.WriteObject("IQSystem/IQChat/AntiNoob", UserInformationConnection);
-        }
-        void Init()
-        {
-            ReadData();
-        }
-        
-        
-                private void DrawUI_IQChat_Ignore_Alert(BasePlayer player, BasePlayer Target, UInt64 fakeUserId = 0)
-        {
-            String InterfacePanel = InterfaceBuilder.GetInterface("UI_Chat_Mute_And_Ignore_Alert_Panel");
-            String Interface = InterfaceBuilder.GetInterface("UI_Chat_Ignore_Alert");
-            if (Interface == null || InterfacePanel == null) return;
-
-            Boolean isFake = (IsReadyIQFakeActive() && Target == null && fakeUserId != 0);
-            
-            GeneralInformation.RenameInfo Renamer = isFake ? null : GeneralInfo.GetInfoRename(Target.userID);
-            String NickNamed = isFake ? GetFakeName(fakeUserId.ToString()) : Renamer != null ? $"{Renamer.RenameNick ?? Target.displayName}" : Target.displayName;
-
-            Interface = Interface.Replace("%TITLE%", GetLang(UserInformation[player.userID].Settings.IsIgnored(isFake ? fakeUserId : Target.userID) ? "IQCHAT_TITLE_IGNORE_TITLES_UNLOCK" : "IQCHAT_TITLE_IGNORE_TITLES", player.UserIDString, NickNamed));
-            Interface = Interface.Replace("%BUTTON_YES%", GetLang("IQCHAT_TITLE_IGNORE_BUTTON_YES", player.UserIDString));
-            Interface = Interface.Replace("%BUTTON_NO%", GetLang("IQCHAT_TITLE_IGNORE_BUTTON_NO", player.UserIDString));
-            Interface = Interface.Replace("%COMMAND%", $"newui.cmd action.mute.ignore ignore.and.mute.controller {SelectedAction.Ignore} confirm.yes {(isFake ? fakeUserId : Target.userID)}");
-
-            CuiHelper.DestroyUi(player, "MUTE_AND_IGNORE_PANEL_ALERT");
-            CuiHelper.AddUi(player, InterfacePanel);
-            CuiHelper.AddUi(player, Interface);
-        }
-
-        
-        
-        private void SetupParametres(String ID, String Permissions)
-        {
-            UInt64 UserID = UInt64.Parse(ID);
-            BasePlayer player = BasePlayer.FindByID(UserID);
-            Configuration.ControllerConnection.Turned Controller = config.ControllerConnect.Turneds;
-            Configuration.ControllerParameters Parameters = config.ControllerParameter;
-
-            if (!UserInformation.ContainsKey(UserID)) return;
-            User Info = UserInformation[UserID];
-
-            if (Controller.TurnAutoSetupPrefix)
-            {
-                Configuration.ControllerParameters.AdvancedFuncion Prefixes = Parameters.Prefixes.Prefixes.FirstOrDefault(prefix => prefix.Permissions == Permissions);
-                if (Prefixes != null)
-                {
-                    if (Parameters.Prefixes.TurnMultiPrefixes && !Info.Info.PrefixList.Contains(Prefixes.Argument))
-                        Info.Info.PrefixList.Add(Prefixes.Argument);
-                    else Info.Info.Prefix = Prefixes.Argument;
-
-                    if (player != null && config.ControllerMessages.GeneralSetting.alertArgumentsInfoSetup)
-                        ReplySystem(player, GetLang("PREFIX_SETUP", player.UserIDString, Prefixes.Argument));
-
-                    Log(LanguageEn ? $"Player ({UserID}) successfully retrieved the prefix {Prefixes.Argument}" : $"Игрок ({UserID}) успешно забрал префикс {Prefixes.Argument}");
-                }
-            }
-            if (Controller.TurnAutoSetupColorNick)
-            {
-                Configuration.ControllerParameters.AdvancedFuncion ColorNick = Parameters.NickColorList.FirstOrDefault(nick => nick.Permissions == Permissions);
-                if (ColorNick != null)
-                {
-                    Info.Info.ColorNick = ColorNick.Argument;
-                    
-                    if (player != null && config.ControllerMessages.GeneralSetting.alertArgumentsInfoSetup)
-                    {
-                        String nickColorTitle = GetLang("COLOR_NICK_SETUP_TITLE", player.UserIDString); 
-                        Object resultColorMessage = IsGradientColorValue(Info.Info.ColorNick);
-                        if (resultColorMessage is List<String> gradientColors)
-                            nickColorTitle = ApplyGradientToText(nickColorTitle, gradientColors);
-                        else nickColorTitle = $"<color={Info.Info.ColorNick}>{nickColorTitle}</color>";
-                        
-                        ReplySystem(player, GetLang("COLOR_NICK_SETUP", player.UserIDString, nickColorTitle));
-                    }
-
-                    Log(LanguageEn
-                        ? $"Player ({UserID}) successfully took the color of the nickname {ColorNick.Argument}"
-                        : $"Игрок ({UserID}) успешно забрал цвет ника {ColorNick.Argument}");
-                }
-            }
-            if (Controller.TurnAutoSetupColorChat)
-            {
-                Configuration.ControllerParameters.AdvancedFuncion ColorChat = Parameters.MessageColorList.FirstOrDefault(message => message.Permissions == Permissions);
-                if (ColorChat != null)
-                {
-                    Info.Info.ColorMessage = ColorChat.Argument;
-                    
-                    if (player != null && config.ControllerMessages.GeneralSetting.alertArgumentsInfoSetup)
-                    {
-                        String chatColorTitle = GetLang("COLOR_CHAT_SETUP_TITLE", player.UserIDString);
-                        Object resultColorMessage = IsGradientColorValue(Info.Info.ColorMessage);
-                        if (resultColorMessage is List<String> gradientColors)
-                            chatColorTitle = ApplyGradientToText(chatColorTitle, gradientColors);
-                        else chatColorTitle = $"<color={Info.Info.ColorMessage}>{chatColorTitle}</color>";
-                        
-                        ReplySystem(player, GetLang("COLOR_CHAT_SETUP", player.UserIDString, chatColorTitle));
-                    }
-
-                    Log(LanguageEn ? $"Player ({UserID}) successfully retrieved the color of the chat {ColorChat.Argument}" : $"Игрок ({UserID}) успешно забрал цвет чата {ColorChat.Argument}");
-                }
-            }
-        }
-        [ConsoleCommand("saybro")]
-        private void AlertOnlyPlayerConsoleCommand(ConsoleSystem.Arg args)
-        {
-            BasePlayer Sender = args.Player();
-            if (Sender != null)
-                if (!permission.UserHasPermission(Sender.UserIDString, PermissionAlert)) return;
-
-            if (args.Args == null || args.Args.Length == 0)
-            {
-                if (Sender != null)
-                    ReplySystem(Sender, LanguageEn ? "You didn't specify a player!" : "Вы не указали игрока!");
-                else PrintWarning(LanguageEn ? "You didn't specify a player" : "Вы не указали игрока!");
-                return;
-            }
-            BasePlayer Recipient = BasePlayer.Find(args.Args[0]);
-            if (Recipient == null)
-            {
-                if (Sender != null)
-                    ReplySystem(Sender, LanguageEn ? "The player is not on the server!" : "Игрока нет на сервере!");
-                else PrintWarning(LanguageEn ? "The player is not on the server!" : "Игрока нет на сервере!");
-                return;
-            }
-            Alert(Sender, Recipient, args.Args.Skip(1).ToArray());
-        }
-
-        [ChatCommand("ignore")]
-        void IgnorePlayerPM(BasePlayer player, String cmd, String[] arg)
-        {
-            Configuration.ControllerMessage ControllerMessages = config.ControllerMessages;
-            if (!ControllerMessages.TurnedFunc.IgnoreUsePM) return;
-
-            User Info = UserInformation[player.userID];
-
-            if (arg.Length == 0 || arg == null)
-            {
-                ReplySystem(player, GetLang("INGORE_NOTARG", player.UserIDString));
-                return;
-            }
-            String NameUser = arg[0];
-            
-            if (IsFakeUser(NameUser))
-            {
-                var playerList = GetCombinedPlayerList();
-                if (playerList != null)
-                {
-                    var fakeUser = playerList.FirstOrDefault(x => x.displayName.Contains(NameUser));
-                    if (fakeUser != null)
-                    {
-                        if (UInt64.TryParse(fakeUser.userId, out UInt64 userIDFake))
-                        {
-                            String LangFake = !Info.Settings.IsIgnored(userIDFake)
-                                ? GetLang("IGNORE_ON_PLAYER", player.UserIDString, fakeUser.displayName)
-                                : GetLang("IGNORE_OFF_PLAYER", player.UserIDString, fakeUser.displayName);
-                            ReplySystem(player, LangFake);
-
-                            Info.Settings.IgnoredAddOrRemove(userIDFake);
-                        }
-                    }
-                }
-                return;
-            }
-            
-            BasePlayer TargetUser = BasePlayer.Find(NameUser);
-
-            if (TargetUser == null || NameUser == null)
-            {
-                ReplySystem(player, GetLang("COMMAND_PM_NOT_USER", player.UserIDString));
-                return;
-            }
-
-            String Lang = !Info.Settings.IsIgnored(TargetUser.userID) ? GetLang("IGNORE_ON_PLAYER", player.UserIDString, TargetUser.displayName) : GetLang("IGNORE_OFF_PLAYER", player.UserIDString, TargetUser.displayName);
-            ReplySystem(player, Lang);
-
-            Info.Settings.IgnoredAddOrRemove(TargetUser.userID);
-        }
-        
-        static Double CurrentTime => Facepunch.Math.Epoch.Current;
-
-        public Dictionary<UInt64, FlooderInfo> Flooders = new Dictionary<UInt64, FlooderInfo>();
 
         private void Request(string url, string payload, Action<int> callback = null)
         {
@@ -7218,935 +1467,3882 @@ namespace Oxide.Plugins
                 }
                 catch (Exception ex) { }
 
-            }, this, RequestMethod.POST, header, 10f);
+            }, this, RequestMethod.POST, header);
         }
-        public Dictionary<UInt64, User> UserInformation = new Dictionary<UInt64, User>();
+        #endregion
 
-        void ReplyChat(Chat.ChatChannel channel, BasePlayer player, String OutMessage, String FormatMessage, String FormatPlayer)
+        void DiscordSendMessage(string key, string WebHooks, ulong userID = 0, params object[] args)
         {
-            GeneralInformation.RenameInfo RenameInfo = GeneralInfo.GetInfoRename(player.userID);
-            UInt64 RenameID = RenameInfo != null ? RenameInfo.RenameID != 0 ? RenameInfo.RenameID : player.userID : player.userID;
-            
-            if (channel == Chat.ChatChannel.Team)
-            {
-                if (TranslationAPI && config.ReferenceSetting.translationApiSettings.useTranslationApi && config.ReferenceSetting.translationApiSettings.translateTeamChat)
-                    ReplyTranslationMessage(channel, player, player, OutMessage, FormatMessage, FormatPlayer, RenameID);
-                else
+            if (!config.OtherSetting.UseDiscord) return;
+            if (String.IsNullOrWhiteSpace(WebHooks)) return;
+
+            List<Fields> fields = new List<Fields>
                 {
-                    ListHashSet<BasePlayer> playerList = GetPlayerList(player, channel);
-                    if (playerList == null) return;
-                    foreach (BasePlayer p in playerList)
-                        ReplyPlayerChat(channel, p, player, OutMessage, FormatMessage, FormatPlayer, RenameID);
-                }
-            }
-            else
-            {
-                if (TranslationAPI && config.ReferenceSetting.translationApiSettings.useTranslationApi)
-                    ReplyTranslationMessage(channel, player, player, OutMessage, FormatMessage, FormatPlayer, RenameID);
-                else
-                {
-                    foreach (BasePlayer p in BasePlayer.activePlayerList)
-                        ReplyPlayerChat(channel, p, player, OutMessage, FormatMessage, FormatPlayer, RenameID);
-                }
-            }
+                    new Fields("IQChat", key, true),
+                };
+
+            FancyMessage newMessage = new FancyMessage(null, false, new FancyMessage.Embeds[1] { new FancyMessage.Embeds(null, 635133, fields, new Authors("IQChat", "https://vk.com/mir_inc", "https://i.imgur.com/ILk3uJc.png", null), new Footer("Author: Mercury[vk.com/mir_inc]", "https://i.imgur.com/ILk3uJc.png", null)) });
+            Request($"{WebHooks}", newMessage.toJSON());
         }
+        #endregion
 
-        private String GetFakeName(String idOrName)
+        #region Func
+        
+        public bool IsMutedUser(ulong userID)
         {
-            if (!IsReadyIQFakeActive()) return String.Empty;
-            return (String)IQFakeActive.Call("GetFakeName", idOrName);
+            var DataPlayer = ChatSettingUser[userID];
+            return DataPlayer.MuteChatTime > CurrentTime();
         }
-        void API_SEND_PLAYER_DISCONNECTED(String DisplayName, String reason, String userID) 
+        public bool IsMutedVoiceUser(ulong userID)
         {
-            Configuration.ControllerAlert.PlayerSession AlertSessionPlayer = config.ControllerAlertSetting.PlayerSessionSetting;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            if (AlertSessionPlayer.DisconnectedAlert)
-            {
-                String Avatar = AlertSessionPlayer.ConnectedAvatarUse ? userID : String.Empty;
-
-                System.Object[] args = AlertSessionPlayer.DisconnectedReason ? new System.Object[] { DisplayName, reason } : new System.Object[] { DisplayName };
-                String Lang = AlertSessionPlayer.DisconnectedReason ? "LEAVE_PLAYER_REASON" : "LEAVE_PLAYER";
-                ReplyBroadcast(null, Avatar, false, Lang, args);
-            }
+            var DataPlayer = ChatSettingUser[userID];
+            return DataPlayer.MuteVoiceTime > CurrentTime();
         }
+        private bool IsIgnored(ulong userID, ulong TargetID) => (bool)ChatSettingUser[userID].IgnoredUsers.Contains(TargetID);
 
-        [ChatCommand("pm")]
-        void PmChat(BasePlayer Sender, String cmd, String[] arg)
+        private void SeparatorChat(Chat.ChatChannel channel, BasePlayer player, string Message)
         {
-            Configuration.ControllerMessage ControllerMessages = config.ControllerMessages;
-            if (!ControllerMessages.TurnedFunc.PMSetting.PMActivate) return;
-            if (arg.Length == 0 || arg == null)
+            var DataPlayer = ChatSettingUser[player.userID];
+
+            if (IsMutedUser(player.userID))
             {
-                ReplySystem(Sender, lang.GetMessage("COMMAND_PM_NOTARG", this, Sender.UserIDString));
+                ReplySystem(Chat.ChatChannel.Global, player, GetLang("FUNC_MESSAGE_ISMUTED_TRUE", player.UserIDString, FormatTime(TimeSpan.FromSeconds(DataPlayer.MuteChatTime - CurrentTime()))));
                 return;
             }
 
-            Configuration.ControllerMessage.TurnedFuncional.AntiNoob.Settings antiNoob = config.ControllerMessages.TurnedFunc.AntiNoobSetting.AntiNoobPM;
-            if (antiNoob.AntiNoobActivate)
-                if (IsNoob(Sender.userID, antiNoob.TimeBlocked))
+            var RankSettings = config.ReferenceSetting.IQRankSystems;
+            var MessageSettings = config.MessageSetting;
+            var MuteController = config.MuteControllers.AutoMuteSettings;
+            string OutMessage = Message;
+            string PrefxiPlayer = "";
+            string MessageSeparator = "";
+            string ColorNickPlayer = DataPlayer.NickColor;
+            string ColorMessagePlayer = DataPlayer.MessageColor;
+            string DisplayName = AdminSetting.RenameList.ContainsKey(player.userID) ? AdminSetting.RenameList[player.userID] : player.displayName;
+
+            if (MessageSettings.FormatingMessage)
+                OutMessage = $"{Message.ToLower().Substring(0, 1).ToUpper()}{Message.Remove(0, 1).ToLower()}";
+
+            if (MessageSettings.UseBadWords)
+                foreach (var DetectedMessage in OutMessage.Split(' '))
+                    if (MessageSettings.BadWords.Contains(DetectedMessage.ToLower()))
+                    {
+                        OutMessage = OutMessage.Replace(DetectedMessage, MessageSettings.ReplaceBadWord);
+                        BadWords(player);
+                        if (MuteController.UseAutoMute)
+                            MutePlayer(player, MuteType.Chat, 0, null, MuteController.ReasonMute, MuteController.MuteTime);
+                    }
+
+            if (MessageSettings.MultiPrefix)
+            {
+                if (DataPlayer.MultiPrefix != null)
+
+                    for (int i = 0; i < DataPlayer.MultiPrefix.Count; i++)
+                        PrefxiPlayer += DataPlayer.MultiPrefix[i];
+            }
+            else PrefxiPlayer = DataPlayer.ChatPrefix;
+
+            string ModifiedNick = string.IsNullOrWhiteSpace(ColorNickPlayer) ? player.IsAdmin ? $"<color=#a8fc55>{DisplayName}</color>" : $"<color=#54aafe>{DisplayName}</color>" : $"<color={ColorNickPlayer}>{DisplayName}</color>";
+            string ModifiedMessage = string.IsNullOrWhiteSpace(ColorMessagePlayer) ? OutMessage : $"<color={ColorMessagePlayer}>{OutMessage}</color>";
+            string ModifiedChannel = channel == Chat.ChatChannel.Team ? "<color=#a5e664>[Team]</color>" : channel == Chat.ChatChannel.Cards ? "<color=#AA8234>[Cards]</color>" : "";
+
+            string Rank = string.Empty;
+            string RankTime = string.Empty;
+            if (IQRankSystem)
+                if (RankSettings.UseRankSystem)
                 {
-                    ReplySystem(Sender, GetLang("IQCHAT_INFO_ANTI_NOOB_PM", Sender.UserIDString, FormatTime(UserInformationConnection[Sender.userID].LeftTime(antiNoob.TimeBlocked), Sender.UserIDString)));
-                    return;
+                    if (RankSettings.UseTimeStandart)
+                        RankTime = $"{IQRankGetTimeGame(player.userID)}";
+                    Rank = $"{IQRankGetRank(player.userID)}";
                 }
-            
-            User InfoSender = UserInformation[Sender.userID];
-            
-            if(config.ControllerMutes.mutedPM)
-                if (InfoSender.MuteInfo.IsMute(MuteType.Chat))
+            MessageSeparator = !String.IsNullOrWhiteSpace(Rank) && !String.IsNullOrWhiteSpace(RankTime) ? $"{ModifiedChannel} [{RankTime}] [{Rank}] {PrefxiPlayer} {ModifiedNick}: {ModifiedMessage}" : !String.IsNullOrWhiteSpace(RankTime) ? $"{ModifiedChannel} [{RankTime}] {PrefxiPlayer} {ModifiedNick}: {ModifiedMessage}" : !String.IsNullOrWhiteSpace(Rank) ? $"{ModifiedChannel} [{Rank}] {PrefxiPlayer} {ModifiedNick}: {ModifiedMessage}" : $"{ModifiedChannel} {PrefxiPlayer} {ModifiedNick}: {ModifiedMessage}";
+
+            if (config.RustPlusSettings.UseRustPlus)
+                if (channel == Chat.ChatChannel.Team)
                 {
-                    ReplySystem(Sender, GetLang("IQCHAT_FUNCED_NO_SEND_CHAT_MUTED", Sender.UserIDString, FormatTime(InfoSender.MuteInfo.GetTime(MuteType.Chat), Sender.UserIDString)));
-                    return;
+                    RelationshipManager.PlayerTeam Team = RelationshipManager.ServerInstance.FindTeam(player.currentTeam);
+                    if (Team == null) return;
+                    Util.BroadcastTeamChat(player.Team, player.userID, player.displayName, OutMessage, DataPlayer.MessageColor);
                 }
-            
-            String NameUser = arg[0];
 
-            if (IsReadyIQFakeActive() && IsFakeUser(NameUser))
-            {
-                ReplySystem(Sender, GetLang("COMMAND_PM_SUCCESS", Sender.UserIDString, string.Join(" ", arg.ToArray()).Replace(NameUser, ""), NameUser));
-                return;
-            }
-            
-            BasePlayer TargetUser = GetPlayerNickOrID(NameUser);
-            
-            if (TargetUser == null || NameUser == null || !UserInformation.ContainsKey(TargetUser.userID))
-            {
-                ReplySystem(Sender, GetLang("COMMAND_PM_NOT_USER", Sender.UserIDString));
-                return;
-            }
-            
-            User InfoTarget = UserInformation[TargetUser.userID];
-            
-            if (!InfoTarget.Settings.TurnPM)
-            {
-                ReplySystem(Sender, GetLang("FUNC_MESSAGE_PM_TURN_FALSE", Sender.UserIDString));
-                return;
-            }
+            ReplyChat(channel, player, MessageSeparator);
+            AnwserMessage(player, MessageSeparator.ToLower());
+            Puts($"{player}: {OutMessage}");
+            Log($"СООБЩЕНИЕ В ЧАТ : {player}: {ModifiedChannel} {OutMessage}");
+            DiscordSendMessage(GetLang("DISCORD_SEND_LOG_CHAT", player.UserIDString, player.displayName, player.UserIDString, OutMessage, Message), config.OtherSetting.WebhooksChatLog, player.userID);
 
-            if (ControllerMessages.TurnedFunc.IgnoreUsePM)
-            {
-                if (InfoTarget.Settings.IsIgnored(Sender.userID))
-                {
-                    ReplySystem(Sender, GetLang("IGNORE_NO_PM", Sender.UserIDString));
-                    return;
-                }
-                if (InfoSender.Settings.IsIgnored(TargetUser.userID))
-                {
-                    ReplySystem(Sender, GetLang("IGNORE_NO_PM_ME", Sender.UserIDString));
-                    return;
-                }
-            }
-            String Message = GetMessageInArgs(Sender, arg.Skip(1).ToArray());
-
-            if (Message == null || Message.Length <= 0)
-            {
-                ReplySystem(Sender, GetLang("COMMAND_PM_NOT_NULL_MSG", Sender.UserIDString));
-                return;
-            }
-            Message = Message.EscapeRichText();
-
-            if (Message.Length > 125) return;
-            
-            PMHistory[TargetUser] = Sender;
-            PMHistory[Sender] = TargetUser;
-
-            GeneralInformation.RenameInfo RenamerSender = GeneralInfo.GetInfoRename(Sender.userID);
-            GeneralInformation.RenameInfo RenamerTarget = GeneralInfo.GetInfoRename(TargetUser.userID);
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            String DisplayNameSender = RenamerSender != null ? RenamerSender.RenameNick ?? Sender.displayName : Sender.displayName;
-            String TargetDisplayName = RenamerTarget != null ? RenamerTarget.RenameNick ?? TargetUser.displayName : TargetUser.displayName;
-
-            if (TranslationAPI && config.ReferenceSetting.translationApiSettings.useTranslationApi && config.ReferenceSetting.translationApiSettings.translatePmChat)
-                ReplyTranslationPM(Sender, TargetUser, Message, DisplayNameSender, TargetDisplayName);
-            else
-            {
-                ReplySystem(TargetUser, GetLang("COMMAND_PM_SEND_MSG", TargetUser.UserIDString, DisplayNameSender, Message));
-                ReplySystem(Sender, GetLang("COMMAND_PM_SUCCESS", Sender.UserIDString, Message, TargetDisplayName));
-            }
-
-            if (InfoTarget.Settings.TurnSound)
-                Effect.server.Run(ControllerMessages.TurnedFunc.PMSetting.SoundPM, TargetUser.GetNetworkPosition());
-
-            RustApp?.Call("RA_DirectMessageHandler", Sender.UserIDString, TargetUser.UserIDString, Message);
-            
-            Log(LanguageEn ? $"PRIVATE MESSAGES : {DisplayNameSender}({Sender.userID}) sent a message to the player - {TargetDisplayName}({TargetUser.userID})\nMESSAGE : {Message}" : $"ЛИЧНЫЕ СООБЩЕНИЯ : {DisplayNameSender}({Sender.userID}) отправил сообщение игроку - {TargetDisplayName}({TargetUser.userID})\nСООБЩЕНИЕ : {Message}");
-            DiscordLoggPM(Sender, TargetUser, Message);
-		   		 		  						  	   		  		 			  		  		  			 		   			
             RCon.Broadcast(RCon.LogType.Chat, new Chat.ChatEntry
             {
-                Message = LanguageEn ? $"PRIVATE MESSAGES : {DisplayNameSender}({Sender.userID}) -> {TargetDisplayName}({TargetUser.userID}) : MESSAGE : {Message}" : $"ЛИЧНЫЕ СООБЩЕНИЯ : {DisplayNameSender}({Sender.userID}) -> {TargetDisplayName}({TargetUser.userID}) : СООБЩЕНИЕ : {Message}",
-                UserId = Sender.UserIDString,
-                Username = Sender.displayName,
-                Channel = Chat.ChatChannel.Global,
+                Message = $"{player.displayName} : {OutMessage}",
+                UserId = player.UserIDString,
+                Username = player.displayName,
+                Channel = channel,
                 Time = (DateTime.UtcNow.Hour * 3600) + (DateTime.UtcNow.Minute * 60),
-                Color = "#3f4bb8",
             });
-            PrintWarning(LanguageEn ? $"PRIVATE MESSAGES : {DisplayNameSender}({Sender.userID}) -> {TargetDisplayName}({TargetUser.userID}) : MESSAGE : {Message}" : $"ЛИЧНЫЕ СООБЩЕНИЯ : {DisplayNameSender}({Sender.userID}) -> {TargetDisplayName}({TargetUser.userID}) : СООБЩЕНИЕ : {Message}");
-        }
-        [ConsoleCommand("alertuip")]
-        private void AlertUIPConsoleCommand(ConsoleSystem.Arg args)
-        {
-            BasePlayer Sender = args.Player();
-            if (Sender != null)
-                if (!permission.UserHasPermission(Sender.UserIDString, PermissionAlert)) return;
-            if (args.Args == null || args.Args.Length == 0)
-            {
-                if (Sender != null)
-                    ReplySystem(Sender, LanguageEn ? "You didn't specify a player!" : "Вы не указали игрока!");
-                else PrintWarning(LanguageEn ? "You didn't specify a player!" : "Вы не указали игрока!");
-                return;
-            }
-            BasePlayer Recipient = BasePlayer.Find(args.Args[0]);
-            if (Recipient == null)
-            {
-                if (Sender != null)
-                    ReplySystem(Sender, LanguageEn ? "The player is not on the server!" : "Игрока нет на сервере!");
-                else PrintWarning(LanguageEn ? "The player is not on the server!" : "Игрока нет на сервере!");
-                return;
-            }
-            AlertUI(Sender, Recipient, args.Args.Skip(1).ToArray());
-        }
-        [ChatCommand("alertuip")]
-        private void AlertUIPChatCommand(BasePlayer Sender, String cmd, String[] args)
-        {
-            if (!permission.UserHasPermission(Sender.UserIDString, PermissionAlert)) return;
-            if (args == null || args.Length == 0)
-            {
-                ReplySystem(Sender, LanguageEn ? "You didn't specify a player!" : "Вы не указали игрока!");
-                return;
-            }
-            BasePlayer Recipient = BasePlayer.Find(args[0]);
-            if (Recipient == null)
-            {
-                ReplySystem(Sender, LanguageEn ? "The player is not on the server!" : "Игрока нет на сервере!");
-                return;
-            }
-            AlertUI(Sender, Recipient, args.Skip(1).ToArray());
         }
 
-        private void DrawUI_IQChat_Mute_Alert_Reasons(BasePlayer player, BasePlayer Target, String Reason, Int32 Y, MuteType Type, UInt64 IDFake = 0)
+        public void AutoSetupData(string id, string perm)
         {
-            String Interface = InterfaceBuilder.GetInterface("UI_Chat_Mute_Alert_DropList_Reason");
-            if (Interface == null) return;
+            var AutoSetup = config.AutoSetupSetting.SetupAutoSetting;
+            if (String.IsNullOrWhiteSpace(id)) return;
+            if (String.IsNullOrWhiteSpace(perm)) return;
+            ulong userID;
+            if (!ulong.TryParse(id, out userID)) return;
 
-            Interface = Interface.Replace("%OFFSET_MIN%", $"-147.5 {85.42 - (Y * 40)}");
-            Interface = Interface.Replace("%OFFSET_MAX%", $"147.5 {120.42 - (Y * 40)}");
-            Interface = Interface.Replace("%REASON%", Reason);
-            Interface = Interface.Replace("%COMMAND_REASON%", $"newui.cmd action.mute.ignore ignore.and.mute.controller {SelectedAction.Mute} confirm.yes {((IsReadyIQFakeActive() && Target == null && IDFake != 0) ? IDFake : Target.userID)} {Type} {Y}");
-            CuiHelper.AddUi(player, Interface);
-        }
-        void API_ALERT_PLAYER_UI(BasePlayer player, String Message) => DrawUI_IQChat_Alert(player, Message);
-        private String XLevel_GetPrefix(BasePlayer player)
-        {
-            if (!XLevels || !config.ReferenceSetting.XLevelsSettings.UseXLevels) return String.Empty;
-            String xLevelPrefix = (String)XLevels?.CallHook("API_GetPlayerPrefix", player);
-            
-            Object resultColorMessage = IsGradientColorValue(config.ReferenceSetting.XLevelsSettings.colorTag);
-            if (resultColorMessage is List<String> gradientColors)
-                xLevelPrefix = ApplyGradientToText(xLevelPrefix, gradientColors);
-            else xLevelPrefix = $"<color={config.ReferenceSetting.XLevelsSettings.colorTag}>{xLevelPrefix}</color>";
+            if (!ChatSettingUser.ContainsKey(userID)) return;
+            var DataPlayer = ChatSettingUser[userID];
 
-            return xLevelPrefix;
-        }
-
-        
-        
-        private bool OnPlayerChat(BasePlayer player, string message, Chat.ChatChannel channel)
-        {
-            if (Interface.Oxide.CallHook("CanChatMessage", player, message) != null) return false;
-            
-            SeparatorChat(channel, player, message);
-            return false;
-        }
-
-        [ConsoleCommand("rename")]
-        private void ConsoleCommandRename(ConsoleSystem.Arg args)
-        {
-            BasePlayer Renamer = args.Player();
-            if (Renamer == null)
-            {
-                PrintWarning(LanguageEn ? "You can only use this command while on the server" : "Вы можете использовать эту команду только находясь на сервере");
-                return;
-            }
-
-            if (!permission.UserHasPermission(Renamer.UserIDString, PermissionRename)) return;
-            GeneralInformation General = GeneralInfo;
-            if (General == null) return;
-
-            if (args.Args.Length == 0 || args == null)
-            {
-                ReplySystem(Renamer, lang.GetMessage("COMMAND_RENAME_NOTARG", this, Renamer.UserIDString));
-                return;
-            }
-
-            String Name = args.Args[0];
-            UInt64 ID = Renamer.userID;
-            if (args.Args.Length == 2 && args.Args[1] != null && !String.IsNullOrWhiteSpace(args.Args[1]))
-                if (!UInt64.TryParse(args.Args[1], out ID))
+            var Prefix = config.PrefixList.FirstOrDefault(x => x.Permissions == perm);
+            var ColorChat = config.MessageColorList.FirstOrDefault(x => x.Permissions == perm);
+            var ColorNick = config.NickColorList.FirstOrDefault(x => x.Permissions == perm);
+            if (AutoSetup.UseSetupAutoPrefix)
+                if (Prefix != null)
                 {
-                    ReplySystem(Renamer, lang.GetMessage("COMMAND_RENAME_NOT_ID", this, Renamer.UserIDString));
-                    return;
+                    if (!config.MessageSetting.MultiPrefix)
+                        DataPlayer.ChatPrefix = Prefix.Argument;
+                    else DataPlayer.MultiPrefix.Add(Prefix.Argument);
+
+                    BasePlayer player = BasePlayer.FindByID(userID);
+                    if (player != null)
+                        ReplySystem(Chat.ChatChannel.Global, player, GetLang("PREFIX_SETUP", player.UserIDString, Prefix.Argument));
+                }
+            if (AutoSetup.UseSetupAutoColorChat)
+                if (ColorChat != null)
+                {
+                    DataPlayer.MessageColor = ColorChat.Argument;
+
+                    BasePlayer player = BasePlayer.FindByID(userID);
+                    if (player != null)
+                        ReplySystem(Chat.ChatChannel.Global, player, GetLang("COLOR_CHAT_SETUP", player.UserIDString, ColorChat.Argument));
+
+                }
+            if (AutoSetup.UseSetupAutoColorNick)
+                if (ColorNick != null)
+                {
+                    DataPlayer.NickColor = ColorNick.Argument;
+
+                    BasePlayer player = BasePlayer.FindByID(userID);
+                    if (player != null)
+                        ReplySystem(Chat.ChatChannel.Global, player, GetLang("COLOR_NICK_SETUP", player.UserIDString, ColorNick.Argument));
+                }
+        }
+        public void CheckValidInformation(BasePlayer player)
+        {
+            var AutoReturn = config.AutoSetupSetting.ReturnDefaultSetting;
+            var DataInformation = ChatSettingUser[player.userID];
+            var PrefixList = config.PrefixList;
+            var NickColorList = config.NickColorList;
+            var ChatColorList = config.MessageColorList;
+
+            if (config.MessageSetting.MultiPrefix)
+            {
+                foreach (var MyPrefix in DataInformation.MultiPrefix)
+                    if (PrefixList.FirstOrDefault(x => x.Argument == MyPrefix) == null)
+                        NextTick(() => { DataInformation.MultiPrefix.Remove(MyPrefix); });
+            }
+            else
+            {
+                if (PrefixList.FirstOrDefault(x => x.Argument == DataInformation.ChatPrefix) == null)
+                    DataInformation.ChatPrefix = AutoReturn.PrefixDefault;
+            }
+
+            if (NickColorList.FirstOrDefault(x => x.Argument == DataInformation.NickColor) == null)
+                DataInformation.NickColor = AutoReturn.NickDefault;
+
+            if (ChatColorList.FirstOrDefault(x => x.Argument == DataInformation.MessageColor) == null)
+                DataInformation.MessageColor = AutoReturn.MessageDefault;
+        }
+        public void AutoReturnDefaultData(string id, string perm)
+        {
+            var AutoReturn = config.AutoSetupSetting.ReturnDefaultSetting;
+            if (String.IsNullOrWhiteSpace(id)) return;
+            if (String.IsNullOrWhiteSpace(perm)) return;
+            ulong userID;
+            if (!ulong.TryParse(id, out userID)) return;
+            if (!userID.IsSteamId()) return;
+            if (!ChatSettingUser.ContainsKey(userID)) return;
+
+            var DataPlayer = ChatSettingUser[userID];
+
+            var Prefix = config.PrefixList.FirstOrDefault(x => x.Permissions == perm);
+            var ColorChat = config.MessageColorList.FirstOrDefault(x => x.Permissions == perm);
+            var ColorNick = config.NickColorList.FirstOrDefault(x => x.Permissions == perm);
+
+            if (AutoReturn.UseDropPrefix)
+                if (Prefix != null)
+                {
+                    if (config.MessageSetting.MultiPrefix)
+                    {
+                        if (DataPlayer.MultiPrefix.Contains(Prefix.Argument))
+                        {
+                            DataPlayer.MultiPrefix.Remove(Prefix.Argument);
+
+                            BasePlayer player = BasePlayer.FindByID(userID);
+                            if (player != null)
+                                ReplySystem(Chat.ChatChannel.Global, player, GetLang("PREFIX_RETURNRED", player.UserIDString, Prefix.Argument));
+                        }
+                    }
+                    else if (DataPlayer.ChatPrefix == Prefix.Argument)
+                    {
+                        DataPlayer.ChatPrefix = AutoReturn.PrefixDefault;
+
+                        BasePlayer player = BasePlayer.FindByID(userID);
+                        if (player != null)
+                            ReplySystem(Chat.ChatChannel.Global, player, GetLang("PREFIX_RETURNRED", player.UserIDString, Prefix.Argument));
+                    }
+                }
+            if (AutoReturn.UseDropColorChat)
+                if (ColorChat != null)
+                    if (DataPlayer.MessageColor == ColorChat.Argument)
+                    {
+                        DataPlayer.MessageColor = AutoReturn.MessageDefault;
+
+                        BasePlayer player = BasePlayer.FindByID(userID);
+                        if (player != null)
+                        ReplySystem(Chat.ChatChannel.Global, player, GetLang("COLOR_CHAT_RETURNRED", player.UserIDString, ColorChat.Argument));
+
+                    }
+            if (AutoReturn.UseDropColorNick)
+                if (ColorNick != null)
+                    if (DataPlayer.NickColor == ColorNick.Argument)
+                    {
+                        DataPlayer.NickColor = AutoReturn.NickDefault;
+
+                        BasePlayer player = BasePlayer.FindByID(userID);
+                        if (player != null)
+                            ReplySystem(Chat.ChatChannel.Global, player, GetLang("COLOR_NICK_RETURNRED", player.UserIDString, ColorNick.Argument));
+                    }
+        }   
+        public void AnwserMessage(BasePlayer player, string Message)
+        {
+            var Anwser = config.AnswerMessages;
+            if (!Anwser.UseAnswer) return;
+
+            foreach (var Anwsers in Anwser.AnswerMessageList)
+                if (Message.Contains(Anwsers.Key.ToLower()))
+                    ReplySystem(Chat.ChatChannel.Global, player, Anwsers.Value);
+        }
+     
+        public void BroadcastAuto()
+        {
+            var Alert = config.AlertSettings;
+            if (Alert.AlertMessage)
+            {
+                int IndexBroadkastNow = 0;
+                string RandomMsg = string.Empty;
+
+                timer.Every(Alert.MessageListTimer, () =>
+                 {
+                     if (Alert.AlertMessageType)
+                     {
+                         if (IndexBroadkastNow >= Alert.MessageList.Count)
+                             IndexBroadkastNow = 0;
+                         RandomMsg = Alert.MessageList[IndexBroadkastNow++];
+                     }
+                     else RandomMsg = Alert.MessageList[UnityEngine.Random.Range(0, Alert.MessageList.Count)];
+                     ReplyBroadcast(RandomMsg);
+                 });
+            }
+        }
+        private void MutePlayer(BasePlayer Target, MuteType Type, int ReasonIndex, BasePlayer Moderator = null, string ReasonCustom = "", int TimeCustom = 0, bool HideMute = false, bool Command = false)
+        {
+            var ReasonList = config.MuteControllers.ReasonListChat[ReasonIndex];
+            string Reason = string.IsNullOrEmpty(ReasonCustom) ? ReasonList.Reason : ReasonCustom;
+            int MuteTime = TimeCustom == 0 ? ReasonList.TimeMute : TimeCustom;
+            string DisplayNameModerator = Moderator == null ? "Администратор" : Moderator.displayName;
+            ulong IDModerator = Moderator == null ? 0 : Moderator.userID;
+
+            if(Target == null || !Target.IsConnected)
+            {
+                if (Moderator != null && !Command)
+                    AlertController(Moderator, "UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_CHAT_ACTION_NOT_CONNNECTED");
+                return;
+            }
+
+            switch (Type)
+            {
+                case MuteType.Chat:
+                    {
+                        if (Moderator != null && !Command)
+                            if (IsMutedUser(Target.userID))
+                            {
+                                AlertController(Moderator, "UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_CHAT_ACTION_ITSMUTED");
+                                return;
+                            }
+                        
+                        ChatSettingUser[Target.userID].MuteChatTime = MuteTime + CurrentTime();
+                        if (!HideMute)
+                            ReplyBroadcast(GetLang("FUNC_MESSAGE_MUTE_CHAT", Target.UserIDString, DisplayNameModerator, Target.displayName, FormatTime(TimeSpan.FromSeconds(MuteTime)), Reason));
+                        else
+                        {
+                            if(Target != null)
+                            ReplySystem(Chat.ChatChannel.Global, Target, GetLang("FUNC_MESSAGE_MUTE_CHAT", Target.UserIDString, DisplayNameModerator, Target.displayName, FormatTime(TimeSpan.FromSeconds(MuteTime)), Reason));
+                            if(Moderator != null)
+                            ReplySystem(Chat.ChatChannel.Global, Moderator, GetLang("FUNC_MESSAGE_MUTE_CHAT", Target.UserIDString, DisplayNameModerator, Target.displayName, FormatTime(TimeSpan.FromSeconds(MuteTime)), Reason));
+                        }
+                        if (Moderator != null)
+                            if (Moderator != Target)
+                                SetMute(Moderator);
+                        DiscordSendMessage(GetLang("DISCORD_SEND_LOG_MUTE", Target.UserIDString, DisplayNameModerator, IDModerator, Target.displayName, Target.userID, Reason), config.OtherSetting.WebhooksMuteInfo);
+                        break;
+                    }
+                case MuteType.Voice:
+                    {
+                        if (Moderator != null && !Command)
+                            if (IsMutedVoiceUser(Target.userID))
+                            {
+                                AlertController(Moderator, "UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_CHAT_ACTION_ITSMUTED");
+                                return;
+                            }
+                        ChatSettingUser[Target.userID].MuteVoiceTime = MuteTime + CurrentTime();
+                        if (!HideMute)
+                            ReplyBroadcast(GetLang("FUNC_MESSAGE_MUTE_VOICE", Target.UserIDString, DisplayNameModerator, Target.displayName, FormatTime(TimeSpan.FromSeconds(MuteTime)), Reason));
+                        else
+                        {
+                            if (Target != null)
+                                ReplySystem(Chat.ChatChannel.Global, Target, GetLang("FUNC_MESSAGE_MUTE_VOICE", Target.UserIDString, DisplayNameModerator, Target.displayName, FormatTime(TimeSpan.FromSeconds(MuteTime)), Reason));
+                            if (Moderator != null)
+                                ReplySystem(Chat.ChatChannel.Global, Moderator, GetLang("FUNC_MESSAGE_MUTE_VOICE", Target.UserIDString, DisplayNameModerator, Target.displayName, FormatTime(TimeSpan.FromSeconds(MuteTime)), Reason));
+                        }
+                        break;
+                    }
+            }
+            if (Moderator != null && !Command)
+                AlertController(Moderator, "UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_CHAT_ACTION_ACCESS");
+        }
+        private void UnmutePlayer(BasePlayer Target, MuteType Type, BasePlayer Moderator = null, bool HideUnmute = false, bool Command = false)
+        {
+            string DisplayNameModerator = Moderator == null ? "Администратор" : Moderator.displayName;
+            switch (Type)
+            {
+                case MuteType.Chat:
+                    {
+                        ChatSettingUser[Target.userID].MuteChatTime = 0;
+                        if (!HideUnmute)
+                            ReplyBroadcast(GetLang("FUNC_MESSAGE_UNMUTE_CHAT", Target.UserIDString, DisplayNameModerator, Target.displayName));
+                        else
+                        {
+                            if (Target != null)
+                                ReplySystem(Chat.ChatChannel.Global, Target, GetLang("FUNC_MESSAGE_UNMUTE_CHAT", Target.UserIDString, DisplayNameModerator, Target.displayName));
+                            if (Moderator != null)
+                                ReplySystem(Chat.ChatChannel.Global, Moderator, GetLang("FUNC_MESSAGE_UNMUTE_CHAT", Target.UserIDString, DisplayNameModerator, Target.displayName));
+                        }
+                        break;
+                    }
+                case MuteType.Voice:
+                    {
+                        ChatSettingUser[Target.userID].MuteVoiceTime = 0;
+                        if (!HideUnmute)
+                            ReplyBroadcast(GetLang("FUNC_MESSAGE_UNMUTE_VOICE", Target.UserIDString, DisplayNameModerator, Target.displayName));
+                        else
+                        {
+                            if (Target != null)
+                                ReplySystem(Chat.ChatChannel.Global, Target, GetLang("FUNC_MESSAGE_UNMUTE_VOICE", Target.UserIDString, DisplayNameModerator, Target.displayName));
+                            if (Moderator != null)
+                                ReplySystem(Chat.ChatChannel.Global, Moderator, GetLang("FUNC_MESSAGE_UNMUTE_VOICE", Target.UserIDString, DisplayNameModerator, Target.displayName));
+
+                        }
+                        break;
+                    }
+            }
+            if (Moderator != null && !Command)
+                AlertController(Moderator, "UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_CHAT_ACTION_ACCESS");
+        }
+        private void MuteAllChatPlayer(float TimeMute = 86400)
+        {
+            foreach (BasePlayer Target in BasePlayer.activePlayerList)
+                ChatSettingUser[Target.userID].MuteChatTime = TimeMute + CurrentTime();
+        }
+        private void MuteAllVoicePlayer(float TimeMute = 86400)
+        {
+            foreach (BasePlayer Target in BasePlayer.activePlayerList)
+                ChatSettingUser[Target.userID].MuteVoiceTime = TimeMute + CurrentTime();
+        }
+        private void UnMuteAllChatPlayer()
+        {
+            foreach (BasePlayer Target in BasePlayer.activePlayerList)
+                ChatSettingUser[Target.userID].MuteChatTime = 0;
+        }
+        private void UnMuteAllVoicePlayer()
+        {
+            foreach (BasePlayer Target in BasePlayer.activePlayerList)
+                ChatSettingUser[Target.userID].MuteVoiceTime = 0;
+        }
+        public void RenameFunc(BasePlayer player,string NewName)
+        {
+            if (permission.UserHasPermission(player.UserIDString, config.RenamePermission))
+            {
+                if (!AdminSetting.RenameList.ContainsKey(player.userID))
+                    AdminSetting.RenameList.Add(player.userID, NewName);
+                else AdminSetting.RenameList[player.userID] = NewName;
+                ReplySystem(Chat.ChatChannel.Global, player, GetLang("COMMAND_RENAME_SUCCES", player.UserIDString, NewName));
+            }
+            else ReplySystem(Chat.ChatChannel.Global, player, GetLang("COMMAND_NOT_PERMISSION",player.UserIDString)); 
+        }
+        void AlertUI(BasePlayer player, string[] arg)
+        {
+            if (player != null)
+                if (!player.IsAdmin) return;
+
+            if (arg.Length == 0 || arg == null)
+            {
+                ReplySystem(Chat.ChatChannel.Global, player, GetLang("FUNC_MESSAGE_NO_ARG_BROADCAST", player.UserIDString));
+                return;
+            }
+            string Message = "";
+            foreach (var msg in arg)
+                Message += " " + msg;
+
+            foreach (BasePlayer p in BasePlayer.activePlayerList)
+                UIAlert(p, Message);
+        }
+        void Alert(BasePlayer player, string[] arg, Boolean IsAdmin)
+        {
+            if (player != null)
+                if (!player.IsAdmin) return;
+
+            if (arg.Length == 0 || arg == null)
+            {
+                if(player != null)
+                ReplySystem(Chat.ChatChannel.Global, player, GetLang("FUNC_MESSAGE_NO_ARG_BROADCAST", player.UserIDString));
+                return;
+            }
+            string Message = "";
+            foreach (var msg in arg)
+                Message += " " + msg;
+
+            ReplyBroadcast(Message, "", "", IsAdmin);
+            if (config.RustPlusSettings.UseRustPlus)
+                foreach(var playerList in BasePlayer.activePlayerList)
+                    NotificationList.SendNotificationTo(playerList.userID, NotificationChannel.SmartAlarm, config.RustPlusSettings.DisplayNameAlert, Message, Util.GetServerPairingData());
+        }
+
+        #endregion
+
+        #region Interface
+        private static string IQCHAT_PARENT_MAIN = "IQCHAT_PARENT_MAIN";
+        private static string IQCHAT_PARENT_MAIN_CHAT_PANEL = "IQCHAT_PARENT_MAIN_CHAT_PANEL";
+        private static string IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT = "IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT";
+        private static string IQCHAT_PARENT_MAIN_CHAT_TITLE = "IQCHAT_PARENT_MAIN_CHAT_TITLE";
+        private static string IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL = "IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL";
+        private static string IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL_TITLE = "IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL_TITLE";
+        private static string IQCHAT_PARENT_ALERT_UI = "IQCHAT_PARENT_ALERT_UI";
+        private static string IQCHAT_PARENT_MAIN_IGNORED_UI = "IQCHAT_PARENT_MAIN_IGNORED_UI";
+        private static string IQCHAT_PARENT_MAIN_IGNORED_UI_TITLE = "IQCHAT_PARENT_MAIN_IGNORED_UI_TITLE";
+
+        #region Menu IQChat
+
+        #region UI Menu
+
+        private void IQChat_UI_Menu(BasePlayer player)
+        {
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, IQCHAT_PARENT_MAIN);
+            var Interface = config.InterfaceChat;
+            var InterfacePosition = Interface.InterfacePositions;
+            var PositionMainPanel = InterfacePosition.MainPanels;
+            var PositionInformation = InterfacePosition.MainPanels.InfromationBlock;
+            var PositionModeration = InterfacePosition.MainPanels.ModerationBlock;
+            var PositionSettings = InterfacePosition.MainPanels.SettingBlock;
+            var PositionSliderAndDropList = InterfacePosition.MainPanels.SliderAndDropListBlock;
+            float FadeIn = 0.05f;
+            var DataPlayer = ChatSettingUser[player.userID];
+
+            container.Add(new CuiPanel
+            {
+                CursorEnabled = true,
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                Image = { FadeIn = FadeIn, Color = "0 0 0 0" }
+            }, "Overlay", IQCHAT_PARENT_MAIN);
+
+            container.Add(new CuiElement
+            {
+                Parent = IQCHAT_PARENT_MAIN,
+                Name = IQCHAT_PARENT_MAIN_CHAT_PANEL,
+                Components =
+                        {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexPanel) },
+                        new CuiRectTransformComponent{ AnchorMin = PositionMainPanel.BackgroundAnchorMin, AnchorMax = PositionMainPanel.BackgroundAnchorMax}, 
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "1.2 -1.2", UseGraphicAlpha = true }
+
+                        }
+            });
+
+            container.Add(new CuiPanel 
+            {
+                RectTransform = { AnchorMin = PositionMainPanel.TitleAnchorMin, AnchorMax = PositionMainPanel.TitleAnchorMax },
+                Image = { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexTitle) }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL, IQCHAT_PARENT_MAIN_CHAT_TITLE);
+
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = PositionMainPanel.ContentAnchorMin, AnchorMax = PositionMainPanel.ContentAnchorMax },
+                Image = { FadeIn = FadeIn, Color = "0 0 0 0" }
+            },  IQCHAT_PARENT_MAIN_CHAT_PANEL, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT);
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = PositionMainPanel.CloseButtonAnchorMin, AnchorMax = PositionMainPanel.CloseButtonAnchorMax },
+                Button = { FadeIn = FadeIn, Close = IQCHAT_PARENT_MAIN, Color = HexToRustFormat(Interface.HexLabel), Sprite = "assets/icons/power.png" },
+                Text = { FadeIn = FadeIn, Text = "" }
+            }, IQCHAT_PARENT_MAIN_CHAT_TITLE, "CLOSE_BUTTON");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = PositionMainPanel.TitleLabelAnchorMin, AnchorMax = PositionMainPanel.TitleLabelAnchorMax },
+                Text = { FadeIn = FadeIn, Text = lang.GetMessage("UI_TITLE_PANEL_LABEL", this, player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_TITLE, "TITLE_LABEL");
+
+            #region Information
+            
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = PositionInformation.TitleLabelAnchorMin, AnchorMax = PositionInformation.TitleLabelAnchorMax },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_INFORMATION_TITLE",player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_INFORMATION");
+
+            string FormatTimeMute = IsMutedUser(player.userID) ? FormatTime(TimeSpan.FromSeconds(DataPlayer.MuteChatTime - CurrentTime())) : GetLang("UI_CHAT_PANEL_INFORMATION_MUTED_TITLE_NOT",player.UserIDString);
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = PositionInformation.MutedLabelAnchorMin, AnchorMax = PositionInformation.MutedLabelAnchorMax },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_INFORMATION_MUTED_TITLE", player.UserIDString, FormatTimeMute), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_INFORMATION_MUTE_TIME");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = PositionInformation.IgnoredLabelAnchorMin, AnchorMax = PositionInformation.IgnoredLabelAnchorMax },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_INFORMATION_IGNORED_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_INFORMATION_IGNORED_TITLE");
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = PositionInformation.IgnoredButtonAnchorMin, AnchorMax = PositionInformation.IgnoredButtonAnchorMax },
+                Button = { FadeIn = FadeIn, Command = "iq.chat ignore.controller open", Color = HexToRustFormat(Interface.HexButton) },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_INFORMATION_IGNORED_BUTTON_TITLE", player.UserIDString, DataPlayer.IgnoredUsers.Count), Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleCenter }
+            },  IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_INFORMATION_IGNORED_TITLE_COUNT");
+
+            #endregion
+
+            #region Moderation Panel
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = PositionModeration.TitleLabelAnchorMin, AnchorMax = PositionModeration.TitleLabelAnchorMax },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_MODERATOR_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_SETTINGS");
+
+            if (permission.UserHasPermission(player.UserIDString, PermMuteMenu))
+            {
+                container.Add(new CuiButton
+                {
+                    RectTransform = { AnchorMin = PositionModeration.ButtonMuteAnchorMin, AnchorMax = PositionModeration.ButtonMuteAnchorMax },
+                    Button = { FadeIn = FadeIn, Command = "iq.chat mute.controller open.menu", Color = HexToRustFormat(Interface.HexButton) },
+                    Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_MODERATOR_MUTE_BUTTON_TITLE", player.UserIDString, DataPlayer.IgnoredUsers.Count), Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleCenter }
+                }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_PANEL_MODERATION_BUTTON_MUTE");
+            }
+
+            #endregion
+
+            #region User Interface
+
+            #region Settings
+
+            container.Add(new CuiLabel 
+            {
+                RectTransform = { AnchorMin = PositionSettings.TitleSettingAnchorMin, AnchorMax = PositionSettings.TitleSettingAnchorMax },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_SETTINGS_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_SETTINGS");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = PositionSettings.SettingPMLabelAnchorMin, AnchorMax = PositionSettings.SettingPMLabelAnchorMax },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_SETTINGS_PM_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_SETTINGS_PM_TITLE");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = PositionSettings.SettingBroadcastAnchorMin, AnchorMax = PositionSettings.SettingBroadcastAnchorMax },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_SETTINGS_BROADCAST_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "UI_CHAT_PANEL_SETTINGS_BROADCAST_TITLE");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = PositionSettings.SettingAlertAnchorMin, AnchorMax = PositionSettings.SettingAlertAnchorMax },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_SETTINGS_ALERT_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleRight }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_SETTINGS_ALERT_TITLE");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = PositionSettings.SettingSoundAnchorMin, AnchorMax = PositionSettings.SettingSoundAnchorMax },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_SETTINGS_SOUND_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleRight }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "UI_CHAT_PANEL_SETTINGS_SOUND_TITLE");
+
+            container.Add(new CuiElement
+            {
+                Parent = IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT,
+                Name = "TURNED_PM_BOX",
+                Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexPanel) },
+                        new CuiRectTransformComponent{ AnchorMin = PositionSettings.BoxSettingPMLabelAnchorMin, AnchorMax = PositionSettings.BoxSettingPMLabelAnchorMax },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.2", UseGraphicAlpha = true }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Parent = IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT,
+                Name = "TURNED_BROADCAST_BOX",
+                Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexPanel) },
+                        new CuiRectTransformComponent{ AnchorMin = PositionSettings.BoxSettingBroadcastAnchorMin, AnchorMax = PositionSettings.BoxSettingBroadcastAnchorMax },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.5", UseGraphicAlpha = true }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Parent = IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT,
+                Name = "TURNED_SOUND_BOX",
+                Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexPanel) },
+                        new CuiRectTransformComponent{ AnchorMin = PositionSettings.BoxSettingSoundAnchorMin, AnchorMax = PositionSettings.BoxSettingSoundAnchorMax },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.5", UseGraphicAlpha = true }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Parent = IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT,
+                Name = "TURNED_ALERT_BOX",
+                Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexPanel) },
+                        new CuiRectTransformComponent{ AnchorMin = PositionSettings.BoxSettingAlertAnchorMin, AnchorMax = PositionSettings.BoxSettingAlertAnchorMax },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.2", UseGraphicAlpha = true }
+                }
+            });
+            
+            #region Rank
+            if (IQRankSystem)
+                if (config.ReferenceSetting.IQRankSystems.UseRankSystem)
+                {
+                    container.Add(new CuiLabel
+                    {
+                        RectTransform = { AnchorMin = PositionSliderAndDropList.TitleSliderAndDropListRankAnchorMin, AnchorMax = PositionSliderAndDropList.TitleSliderAndDropListRankAnchorMax },
+                        Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_RANK_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+                    }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_RANK");
+
+                    container.Add(new CuiPanel
+                    {
+                        RectTransform = { AnchorMin = PositionSliderAndDropList.SliderAndDropListRankAnchorMin, AnchorMax = PositionSliderAndDropList.SliderAndDropListRankAnchorMax },
+                        Image = { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexButton) }
+                    }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "RANK_TAKED_PANEL");
                 }
 
-            if (General.RenameList.ContainsKey(Renamer.userID))
-            {
-                General.RenameList[Renamer.userID].RenameNick = Name;
-                General.RenameList[Renamer.userID].RenameID = ID;
-            }
-            else General.RenameList.Add(Renamer.userID, new GeneralInformation.RenameInfo { RenameNick = Name, RenameID = ID });
+            #endregion
 
-            ReplySystem(Renamer, GetLang("COMMAND_RENAME_SUCCES", Renamer.UserIDString, Name, ID));
-            RenameUpdate(Renamer, Name);
+            #region Chat
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = PositionSliderAndDropList.TitleSliderAndDropListChatColorAnchorMin, AnchorMax = PositionSliderAndDropList.TitleSliderAndDropListChatColorAnchorMax },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_CHAT_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_CHAT");
+
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = PositionSliderAndDropList.SliderAndDropListChatColorAnchorMin, AnchorMax = PositionSliderAndDropList.SliderAndDropListChatColorAnchorMax },
+                Image = { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexButton) }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "CHAT_TAKED_PANEL");
+
+            #endregion
+
+            #region Nick
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = PositionSliderAndDropList.TitleSliderAndDropListNickColorAnchorMin, AnchorMax = PositionSliderAndDropList.TitleSliderAndDropListNickColorAnchorMax },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_NICK_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_NICK");
+
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = PositionSliderAndDropList.SliderAndDropListNickColorAnchorMin, AnchorMax = PositionSliderAndDropList.SliderAndDropListNickColorAnchorMax },
+                Image = { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexButton) }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "NICKED_TAKED_PANEL");
+
+            #endregion
+
+            #region Prefix
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = PositionSliderAndDropList.TitleSliderAndDropListPrefixAnchorMin, AnchorMax = PositionSliderAndDropList.TitleSliderAndDropListPrefixAnchorMax },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_PREFIX_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_PREFIX");
+
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = PositionSliderAndDropList.SliderAndDropListPrefixAnchorMin, AnchorMax = PositionSliderAndDropList.SliderAndDropListPrefixAnchorMax },
+                Image = { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexButton) }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "PREFIX_TAKED_PANEL");
+
+            #endregion
+
+            #endregion
+
+            #endregion
+
+            CuiHelper.AddUi(player, container);
+            UI_Prefix_Taked(player);
+            UI_Nick_Taked(player);
+            UI_Chat_Taked(player);
+            if (IQRankSystem)
+                if (config.ReferenceSetting.IQRankSystems.UseRankSystem)
+                    UI_Rank_Taked(player);
+            TurnedPM(player);
+            TurnedAlert(player);
+            TurnedBroadcast(player);
+            TurnedSound(player);
+            UpdateNick(player);
+            if(player.IsAdmin)
+            {
+                TurnedAdminButtonMuteAllVoice(player);
+                TurnedAdminButtonMuteAllChat(player);
+            }
         }
-        Boolean API_CHECK_MUTE_CHAT(UInt64 ID)
+
+        #endregion
+
+        #region Controller Elements User
+
+        #region Prefix
+
+        private void UI_Prefix_Taked(BasePlayer player, int Index = 0, int Page = 0)
         {
-            if (!UserInformation.ContainsKey(ID)) return false;
-            return UserInformation[ID].MuteInfo.IsMute(MuteType.Chat);
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, "TITLE_PREFIX");
+            CuiHelper.DestroyUi(player, "PREFIX_TAKED_PANEL_NEXT_BACK_BUTTON");
+            CuiHelper.DestroyUi(player, "PREFIX_TAKED_PANEL_NEXT_BUTTON");
+            CuiHelper.DestroyUi(player, "PREFIX_TAKED_PANEL_DROP_LIST");
+            CuiHelper.DestroyUi(player, "PREFIX_TAKED_PANEL_DROP_LIST_BUTTON");
+
+            var Interface = config.InterfaceChat;
+            float FadeIn = 0.3f;
+            var DataPlayer = ChatSettingUser[player.userID];
+            var PrefixList = Interface.OtherSettingInterface.DropListPrefixUse ? config.PrefixList.Where(p => permission.UserHasPermission(player.UserIDString, p.Permissions)).Skip(8 * Page).ToList() : config.PrefixList.Where(p => permission.UserHasPermission(player.UserIDString, p.Permissions)).ToList();
+            string Prefix = PrefixList == null || PrefixList.Count == 0 ? GetLang("UI_CHAT_PANEL_TAKE_PREFIX", player.UserIDString) : config.MessageSetting.MultiPrefix ? GetLang("UI_CHAT_PANEL_TAKE_PREFIX_MULTI", player.UserIDString) : PrefixList[Index].Argument;
+
+            if (!config.MessageSetting.MultiPrefix && !config.InterfaceChat.OtherSettingInterface.DropListPrefixUse)
+            {
+                #region Page 
+                string ColorBackPage = Index != 0 ? Interface.HexPageButtonActive : Interface.HexPageButtonInActive;
+                string CommandBackPage = Index != 0 ? $"iq.chat take.element.user {TakeElemntUser.Prefix} {Index - 1} 0" : "";
+
+                string ColortNextPage = (PrefixList.Count() - 1) > Index ? Interface.HexPageButtonActive : Interface.HexPageButtonInActive;
+                string CommandNextPage = (PrefixList.Count() - 1) > Index ? $"iq.chat take.element.user {TakeElemntUser.Prefix} {Index + 1} 0" : "";
+
+                container.Add(new CuiElement
+                {
+                    Parent = "PREFIX_TAKED_PANEL",
+                    Name = "PREFIX_TAKED_PANEL_PAGE_BACK",
+                    Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(ColorBackPage) },
+                        new CuiRectTransformComponent{ AnchorMin = $"0.009342605 0.09161124", AnchorMax = $"0.09342606 0.8855753" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.2", UseGraphicAlpha = true }
+                }
+                });
+
+                container.Add(new CuiButton
+                {
+                    FadeOut = 0.3f,
+                    RectTransform = { AnchorMin = $"0 0", AnchorMax = $"1 0.92" },
+                    Button = { FadeIn = FadeIn, Command = CommandBackPage, Color = "0 0 0 0" },
+                    Text = { FadeIn = FadeIn, Text = $"↩", Color = HexToRustFormat(Interface.HexLabel), Font = "robotocondensed-regular.ttf", FontSize = 15, Align = TextAnchor.MiddleCenter }
+                }, "PREFIX_TAKED_PANEL_PAGE_BACK", "PREFIX_TAKED_PANEL_PAGE_BACK_BUTTON");
+
+                container.Add(new CuiElement
+                {
+                    Parent = "PREFIX_TAKED_PANEL",
+                    Name = "PREFIX_TAKED_PANEL_NEXT_PAGE",
+                    Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(ColortNextPage) },
+                        new CuiRectTransformComponent{ AnchorMin = $"0.9062352 0.09161124", AnchorMax = $"0.9918757 0.8855753" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.2", UseGraphicAlpha = true }
+                }
+                });
+
+                container.Add(new CuiButton
+                {
+                    FadeOut = 0.3f,
+                    RectTransform = { AnchorMin = $"0 0", AnchorMax = $"1 0.92" },
+                    Button = { FadeIn = FadeIn, Command = CommandNextPage, Color = "0 0 0 0" },
+                    Text = { FadeIn = FadeIn, Text = $"↪", Color = HexToRustFormat(Interface.HexLabel), Font = "robotocondensed-regular.ttf", FontSize = 15, Align = TextAnchor.MiddleCenter }
+                }, "PREFIX_TAKED_PANEL_NEXT_PAGE", "PREFIX_TAKED_PANEL_NEXT_BUTTON");
+
+                #endregion
+            }
+            else
+            {
+                if (!config.MessageSetting.MultiPrefix)
+                    CuiHelper.DestroyUi(player, "DROP_LIST_PANEL_ELEMENT");
+
+                #region Drop List
+
+                container.Add(new CuiElement
+                {
+                    Parent = "PREFIX_TAKED_PANEL",
+                    Name = "PREFIX_TAKED_PANEL_DROP_LIST",
+                    Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexPageButtonActive) },
+                        new CuiRectTransformComponent{ AnchorMin = $"0.9062352 0.09161124", AnchorMax = $"0.9918757 0.8855753" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.2", UseGraphicAlpha = true }
+                }
+                });
+
+                TakeElemntUser PrefixController = Interface.OtherSettingInterface.DropListPrefixUse && !config.MessageSetting.MultiPrefix ? TakeElemntUser.Prefix : TakeElemntUser.MultiPrefix;
+                container.Add(new CuiButton
+                {
+                    FadeOut = 0.3f,
+                    RectTransform = { AnchorMin = $"0.2181819 0.1923077", AnchorMax = $"0.8000001 0.8076923" },
+                    Button = { FadeIn = FadeIn, Command = $"iq.chat take.element.droplist false {PrefixController}", Color = HexToRustFormat(Interface.HexLabel), Sprite = "assets/icons/electric.png" },
+                    Text = { FadeIn = FadeIn, Text = "" }
+                }, "PREFIX_TAKED_PANEL_DROP_LIST", "PREFIX_TAKED_PANEL_DROP_LIST_BUTTON");
+
+                #endregion
+            }
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.1307966 0", AnchorMax = "0.8501773 1" },
+                Text = { FadeIn = FadeIn, Text = Prefix, Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), FontSize = 15, Align = TextAnchor.MiddleCenter }
+            }, "PREFIX_TAKED_PANEL", "TITLE_PREFIX");
+
+            CuiHelper.AddUi(player, container);
         }
-        private const String PermissionMutedAdmin = "iqchat.adminmuted";
-        private void OnUserConnected(IPlayer player) => ControlledBadNick(player);
-		   		 		  						  	   		  		 			  		  		  			 		   			
-        [ChatCommand("mute")]
-        void MuteCustomChat(BasePlayer Moderator, string cmd, string[] arg)
+
+        #endregion
+
+        #region Nick
+
+        private void UI_Nick_Taked(BasePlayer player, int Index = 0, int Page = 0)
         {
-            if (!permission.UserHasPermission(Moderator.UserIDString, PermissionMute)) return;
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, "TITLE_NICKED");
+            CuiHelper.DestroyUi(player, "NICKED_TAKED_PANEL_NEXT_BACK_BUTTON");
+            CuiHelper.DestroyUi(player, "NICKED_TAKED_PANEL_NEXT_BUTTON");
+
+            var Interface = config.InterfaceChat;
+            float FadeIn = 0.3f;
+            var DataPlayer = ChatSettingUser[player.userID];
+            var ColorList = Interface.OtherSettingInterface.DropListColorNickUse ? config.NickColorList.Where(p => permission.UserHasPermission(player.UserIDString, p.Permissions)).Skip(8 * Page).ToList() : config.NickColorList.Where(p => permission.UserHasPermission(player.UserIDString, p.Permissions)).ToList();
+            string Color = ColorList == null || ColorList.Count == 0 ? GetLang("UI_CHAT_PANEL_TAKE_COLOR", player.UserIDString) : $"<color={ColorList[Index].Argument}>{player.displayName}</color>";
+
+            if (!Interface.OtherSettingInterface.DropListColorNickUse)
+            {
+                #region Page 
+                string ColorBackPage = Index != 0 ? Interface.HexPageButtonActive : Interface.HexPageButtonInActive;
+                string CommandBackPage = Index != 0 ? $"iq.chat take.element.user {TakeElemntUser.Nick} {Index - 1} 0" : "";
+
+                string ColortNextPage = (ColorList.Count() - 1) > Index ? Interface.HexPageButtonActive : Interface.HexPageButtonInActive;
+                string CommandNextPage = (ColorList.Count() - 1) > Index ? $"iq.chat take.element.user {TakeElemntUser.Nick} {Index + 1} 0" : "";
+
+                container.Add(new CuiElement
+                {
+                    Parent = "NICKED_TAKED_PANEL",
+                    Name = "NICKED_TAKED_PANEL_PAGE_BACK",
+                    Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(ColorBackPage) },
+                        new CuiRectTransformComponent{ AnchorMin = $"0.009342605 0.09161124", AnchorMax = $"0.09342606 0.8855753" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.2", UseGraphicAlpha = true }
+                }
+                });
+
+                container.Add(new CuiButton
+                {
+                    FadeOut = 0.3f,
+                    RectTransform = { AnchorMin = $"0 0", AnchorMax = $"1 0.92" },
+                    Button = { FadeIn = FadeIn, Command = CommandBackPage, Color = "0 0 0 0" },
+                    Text = { FadeIn = FadeIn, Text = $"↩", Color = HexToRustFormat(Interface.HexLabel), Font = "robotocondensed-regular.ttf", FontSize = 15, Align = TextAnchor.MiddleCenter }
+                }, "NICKED_TAKED_PANEL_PAGE_BACK", "NICKED_TAKED_PANEL_PAGE_BACK_BUTTON");
+
+                container.Add(new CuiElement
+                {
+                    Parent = "NICKED_TAKED_PANEL",
+                    Name = "NICKED_TAKED_PANEL_NEXT_PAGE",
+                    Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(ColortNextPage) },
+                        new CuiRectTransformComponent{ AnchorMin = $"0.9062352 0.09161124", AnchorMax = $"0.9918757 0.8855753" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.2", UseGraphicAlpha = true }
+                }
+                });
+
+                container.Add(new CuiButton
+                {
+                    FadeOut = 0.3f,
+                    RectTransform = { AnchorMin = $"0 0", AnchorMax = $"1 0.92" },
+                    Button = { FadeIn = FadeIn, Command = CommandNextPage, Color = "0 0 0 0" },
+                    Text = { FadeIn = FadeIn, Text = $"↪", Color = HexToRustFormat(Interface.HexLabel), Font = "robotocondensed-regular.ttf", FontSize = 15, Align = TextAnchor.MiddleCenter }
+                }, "NICKED_TAKED_PANEL_NEXT_PAGE", "NICKED_TAKED_PANEL_NEXT_BUTTON");
+
+                #endregion
+            }
+            else
+            {
+                CuiHelper.DestroyUi(player, "DROP_LIST_PANEL_ELEMENT");
+
+                #region Drop List
+
+                container.Add(new CuiElement
+                {
+                    Parent = "NICKED_TAKED_PANEL",
+                    Name = "NICKED_TAKED_PANEL_DROP_LIST",
+                    Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexPageButtonActive) },
+                        new CuiRectTransformComponent{ AnchorMin = $"0.9062352 0.09161124", AnchorMax = $"0.9918757 0.8855753" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.2", UseGraphicAlpha = true }
+                }
+                });
+
+                container.Add(new CuiButton
+                {
+                    FadeOut = 0.3f,
+                    RectTransform = { AnchorMin = $"0.2181819 0.1923077", AnchorMax = $"0.8000001 0.8076923" },
+                    Button = { FadeIn = FadeIn, Command = $"iq.chat take.element.droplist false {TakeElemntUser.Nick}", Color = HexToRustFormat(Interface.HexLabel), Sprite = "assets/icons/electric.png" },
+                    Text = { FadeIn = FadeIn, Text = "" }
+                }, "NICKED_TAKED_PANEL_DROP_LIST", "NICKED_TAKED_PANEL_DROP_LIST_BUTTON");
+
+                #endregion
+            }
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.1307966 0", AnchorMax = "0.8501773 1" },
+                Text = { FadeIn = FadeIn, Text = Color, Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), FontSize = 15, Align = TextAnchor.MiddleCenter }
+            }, "NICKED_TAKED_PANEL", "TITLE_NICKED");
+
+            CuiHelper.AddUi(player, container);
+        }
+
+        #endregion
+
+        #region Chat
+
+        private void UI_Chat_Taked(BasePlayer player, int Index = 0, int Page = 0)
+        {
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, "TITLE_CHAT");
+            CuiHelper.DestroyUi(player, "CHAT_TAKED_PANEL_NEXT_BACK_BUTTON");
+            CuiHelper.DestroyUi(player, "CHAT_TAKED_PANEL_NEXT_BUTTON");
+
+            var Interface = config.InterfaceChat;
+            float FadeIn = 0.3f;
+            var DataPlayer = ChatSettingUser[player.userID];
+            var ColorList = Interface.OtherSettingInterface.DropListColorChatUse ? config.MessageColorList.Where(p => permission.UserHasPermission(player.UserIDString, p.Permissions)).Skip(8 * Page).ToList() : config.MessageColorList.Where(p => permission.UserHasPermission(player.UserIDString, p.Permissions)).ToList();
+            string Color = ColorList == null || ColorList.Count == 0 ? GetLang("UI_CHAT_PANEL_TAKE_COLOR", player.UserIDString) : $"<color={ColorList[Index].Argument}>я лучший</color>";
+
+            if (!Interface.OtherSettingInterface.DropListColorChatUse)
+            {
+                #region Page 
+                string ColorBackPage = Index != 0 ? Interface.HexPageButtonActive : Interface.HexPageButtonInActive;
+                string CommandBackPage = Index != 0 ? $"iq.chat take.element.user {TakeElemntUser.Chat} {Index - 1} 0" : "";
+
+                string ColortNextPage = (ColorList.Count() - 1) > Index ? Interface.HexPageButtonActive : Interface.HexPageButtonInActive;
+                string CommandNextPage = (ColorList.Count() - 1) > Index ? $"iq.chat take.element.user {TakeElemntUser.Chat} {Index + 1} 0" : "";
+
+                container.Add(new CuiElement
+                {
+                    Parent = "CHAT_TAKED_PANEL",
+                    Name = "CHAT_TAKED_PANEL_PAGE_BACK",
+                    Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(ColorBackPage) },
+                        new CuiRectTransformComponent{ AnchorMin = $"0.009342605 0.09161124", AnchorMax = $"0.09342606 0.8855753" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.2", UseGraphicAlpha = true }
+                }
+                });
+
+                container.Add(new CuiButton
+                {
+                    FadeOut = 0.3f,
+                    RectTransform = { AnchorMin = $"0 0", AnchorMax = $"1 0.92" },
+                    Button = { FadeIn = FadeIn, Command = CommandBackPage, Color = "0 0 0 0" },
+                    Text = { FadeIn = FadeIn, Text = $"↩", Color = HexToRustFormat(Interface.HexLabel), Font = "robotocondensed-regular.ttf", FontSize = 15, Align = TextAnchor.MiddleCenter }
+                }, "CHAT_TAKED_PANEL_PAGE_BACK", "CHAT_TAKED_PANEL_PAGE_BACK_BUTTON");
+
+                container.Add(new CuiElement
+                {
+                    Parent = "CHAT_TAKED_PANEL",
+                    Name = "CHAT_TAKED_PANEL_NEXT_PAGE",
+                    Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(ColortNextPage) },
+                        new CuiRectTransformComponent{ AnchorMin = $"0.9062352 0.09161124", AnchorMax = $"0.9918757 0.8855753" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.2", UseGraphicAlpha = true }
+                }
+                });
+
+                container.Add(new CuiButton
+                {
+                    FadeOut = 0.3f,
+                    RectTransform = { AnchorMin = $"0 0", AnchorMax = $"1 0.92" },
+                    Button = { FadeIn = FadeIn, Command = CommandNextPage, Color = "0 0 0 0" },
+                    Text = { FadeIn = FadeIn, Text = $"↪", Color = HexToRustFormat(Interface.HexLabel), Font = "robotocondensed-regular.ttf", FontSize = 15, Align = TextAnchor.MiddleCenter }
+                }, "CHAT_TAKED_PANEL_NEXT_PAGE", "CHAT_TAKED_PANEL_NEXT_BUTTON");
+
+                #endregion
+            }
+            else
+            {
+                CuiHelper.DestroyUi(player, "DROP_LIST_PANEL_ELEMENT");
+
+                #region Drop List
+
+                container.Add(new CuiElement
+                {
+                    Parent = "CHAT_TAKED_PANEL",
+                    Name = "CHAT_TAKED_PANEL_DROP_LIST",
+                    Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexPageButtonActive) },
+                        new CuiRectTransformComponent{ AnchorMin = $"0.9062352 0.09161124", AnchorMax = $"0.9918757 0.8855753" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.2", UseGraphicAlpha = true }
+                }
+                });
+
+                container.Add(new CuiButton
+                {
+                    FadeOut = 0.3f,
+                    RectTransform = { AnchorMin = $"0.2181819 0.1923077", AnchorMax = $"0.8000001 0.8076923" },
+                    Button = { FadeIn = FadeIn, Command = $"iq.chat take.element.droplist false {TakeElemntUser.Chat}", Color = HexToRustFormat(Interface.HexLabel), Sprite = "assets/icons/electric.png" },
+                    Text = { FadeIn = FadeIn, Text = "" }
+                }, "CHAT_TAKED_PANEL_DROP_LIST", "CHAT_TAKED_PANEL_DROP_LIST_BUTTON");
+
+                #endregion
+            }
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.1307966 0", AnchorMax = "0.8501773 1" },
+                Text = { FadeIn = FadeIn, Text = Color, Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), FontSize = 15, Align = TextAnchor.MiddleCenter }
+            }, "CHAT_TAKED_PANEL", "TITLE_CHAT");
+
+            CuiHelper.AddUi(player, container);
+        }
+
+        #endregion
+
+        #region Rank
+
+        private void UI_Rank_Taked(BasePlayer player,int Index = 0, int Page = 0)
+        {
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, "TITLE_RANK");
+            CuiHelper.DestroyUi(player, "RANK_TAKED_PANEL_NEXT_BACK_BUTTON");
+            CuiHelper.DestroyUi(player, "RANK_TAKED_PANEL_NEXT_BUTTON");
+
+            var Interface = config.InterfaceChat;
+            float FadeIn = 0.3f;
+            var RankList = Interface.OtherSettingInterface.DropListRankUse ? IQRankListKey(player.userID).Skip(8 * Page).ToList() : IQRankListKey(player.userID);
+            string Rank = RankList == null || RankList.Count == 0 ? GetLang("UI_CHAT_PANEL_TAKE_RANK", player.UserIDString) : IQRankGetNameRankKey(RankList[Index]);
+
+            if (!Interface.OtherSettingInterface.DropListRankUse)
+            {
+                #region Page 
+                string ColorBackPage = Index != 0 ? Interface.HexPageButtonActive : Interface.HexPageButtonInActive;
+                string CommandBackPage = Index != 0 ? $"iq.chat take.element.user {TakeElemntUser.Rank} {Index - 1} 0" : "";
+
+                string ColortNextPage = (RankList.Count() - 1) > Index ? Interface.HexPageButtonActive : Interface.HexPageButtonInActive;
+                string CommandNextPage = (RankList.Count() - 1) > Index ? $"iq.chat take.element.user {TakeElemntUser.Rank} {Index + 1} 0" : "";
+
+                container.Add(new CuiElement
+                {
+                    Parent = "RANK_TAKED_PANEL",
+                    Name = "RANK_TAKED_PANEL_PAGE_BACK",
+                    Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(ColorBackPage) },
+                        new CuiRectTransformComponent{ AnchorMin = $"0.009342605 0.09161124", AnchorMax = $"0.09342606 0.8855753" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.2", UseGraphicAlpha = true }
+                }
+                });
+
+                container.Add(new CuiButton
+                {
+                    FadeOut = 0.3f,
+                    RectTransform = { AnchorMin = $"0 0", AnchorMax = $"1 0.92" },
+                    Button = { FadeIn = FadeIn, Command = CommandBackPage, Color = "0 0 0 0" },
+                    Text = { FadeIn = FadeIn, Text = $"↩", Color = HexToRustFormat(Interface.HexLabel), Font = "robotocondensed-regular.ttf", FontSize = 15, Align = TextAnchor.MiddleCenter }
+                }, "RANK_TAKED_PANEL_PAGE_BACK", "RANK_TAKED_PANEL_PAGE_BACK_BUTTON");
+
+                container.Add(new CuiElement
+                {
+                    Parent = "RANK_TAKED_PANEL",
+                    Name = "RANK_TAKED_PANEL_NEXT_PAGE",
+                    Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(ColortNextPage) },
+                        new CuiRectTransformComponent{ AnchorMin = $"0.9062352 0.09161124", AnchorMax = $"0.9918757 0.8855753" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.2", UseGraphicAlpha = true }
+                }
+                });
+
+                container.Add(new CuiButton
+                {
+                    FadeOut = 0.3f,
+                    RectTransform = { AnchorMin = $"0 0", AnchorMax = $"1 0.92" },
+                    Button = { FadeIn = FadeIn, Command = CommandNextPage, Color = "0 0 0 0" },
+                    Text = { FadeIn = FadeIn, Text = $"↪", Color = HexToRustFormat(Interface.HexLabel), Font = "robotocondensed-regular.ttf", FontSize = 15, Align = TextAnchor.MiddleCenter }
+                }, "RANK_TAKED_PANEL_NEXT_PAGE", "RANK_TAKED_PANEL_NEXT_BUTTON");
+
+                #endregion
+            }
+            else
+            {
+                CuiHelper.DestroyUi(player, "DROP_LIST_PANEL_ELEMENT");
+
+                #region Drop List
+
+                string AcnhorMin = IQModalMenu ? $"0.9062352 0.06061124" : $"0.9062352 0.09061124";
+                container.Add(new CuiElement
+                {
+                    Parent = "RANK_TAKED_PANEL",
+                    Name = "RANK_TAKED_PANEL_DROP_LIST",
+                    Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexPageButtonActive) },
+                        new CuiRectTransformComponent{ AnchorMin = AcnhorMin, AnchorMax = $"0.9918757 0.8855753" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.2", UseGraphicAlpha = true }
+                }
+                });
+
+                container.Add(new CuiButton
+                {
+                    FadeOut = 0.3f,
+                    RectTransform = { AnchorMin = $"0.2181819 0.1923077", AnchorMax = $"0.8000001 0.8076923" },
+                    Button = { FadeIn = FadeIn, Command = $"iq.chat take.element.droplist false {TakeElemntUser.Rank}", Color = HexToRustFormat(Interface.HexLabel), Sprite = "assets/icons/electric.png" },
+                    Text = { FadeIn = FadeIn, Text = "" }
+                }, "RANK_TAKED_PANEL_DROP_LIST", "RANK_TAKED_PANEL_DROP_LIST_BUTTON");
+
+                #endregion
+            }
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.1307966 0", AnchorMax = "0.8501773 1" },
+                Text = { FadeIn = FadeIn, Text = Rank, Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), FontSize = 15, Align = TextAnchor.MiddleCenter }
+            }, "RANK_TAKED_PANEL", "TITLE_RANK");
+
+            CuiHelper.AddUi(player, container);
+        }
+
+        #endregion
+
+        #region Drop List
+        private void Take_DropList(BasePlayer player, bool IsOpened, TakeElemntUser Type, int Page = 0)
+        {
+            var Interface = config.InterfaceChat;
+            string Parent = Type == TakeElemntUser.MultiPrefix || Type == TakeElemntUser.Prefix ? "PREFIX_TAKED_PANEL" : Type == TakeElemntUser.Nick ? "NICKED_TAKED_PANEL" : Type == TakeElemntUser.Chat ? "CHAT_TAKED_PANEL" : "RANK_TAKED_PANEL";
+            string NameButton = Type == TakeElemntUser.MultiPrefix || Type == TakeElemntUser.Prefix ? "PREFIX_TAKED_PANEL_DROP_LIST" : Type == TakeElemntUser.Nick ? "NICKED_TAKED_PANEL_DROP_LIST" : Type == TakeElemntUser.Chat ? "CHAT_TAKED_PANEL_DROP_LIST" : "RANK_TAKED_PANEL_DROP_LIST";
+            CuiHelper.DestroyUi(player, NameButton + "_BUTTON");
+
+            CuiElementContainer buttonDrop = new CuiElementContainer();
+            string Command = IsOpened ? $"iq.chat take.element.droplist false {Type}" : $"iq.chat take.element.droplist true {Type}";
+
+            buttonDrop.Add(new CuiButton
+            {
+                FadeOut = 0.3f,
+                RectTransform = { AnchorMin = $"0.2181819 0.1923077", AnchorMax = $"0.8000001 0.8076923" },
+                Button = { Command = Command, Color = HexToRustFormat(Interface.HexLabel), Sprite = "assets/icons/electric.png" },
+                Text = { Text = "" }
+            }, NameButton, NameButton + "_BUTTON");
+
+            CuiHelper.AddUi(player, buttonDrop);
+
+            CuiHelper.DestroyUi(player, "DROP_LIST_PANEL_ELEMENT");
+            if (IsOpened) return;
+
+            CuiElementContainer container = new CuiElementContainer();
+            string OffsetMax = IQModalMenu ? "224.5 0" : "215.5 0";
+            string OffsetMaxPage = IQModalMenu ? "222.3 0" : "214 -3";
+
+            container.Add(new CuiElement
+            {
+                Parent = Parent,
+                Name = "DROP_LIST_PANEL_ELEMENT",
+                Components =
+                {
+                        new CuiImageComponent { Color = HexToRustFormat(Interface.HexPageButtonActive) },
+                        new CuiRectTransformComponent{ AnchorMin = $"0 0", AnchorMax = $"0 0", OffsetMin = "1.5 -90", OffsetMax = OffsetMax },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.5 1.2", UseGraphicAlpha = false }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Parent = "DROP_LIST_PANEL_ELEMENT",
+                Name = "PAGE_PANEL_CONTROLLER",
+                Components =
+                {
+                        new CuiImageComponent { Color = HexToRustFormat(Interface.HexPageButtonActive) },
+                        new CuiRectTransformComponent{ AnchorMin = $"0 0", AnchorMax = $"0 0", OffsetMin = "0 -27", OffsetMax = OffsetMaxPage },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.5 1.2", UseGraphicAlpha = false }
+                }
+            });
+
+            CuiHelper.AddUi(player, container);
+            LoadedElementList(player, Type, Page);
+        }
+
+        void LoadedElementList(BasePlayer player, TakeElemntUser Type, int Page = 0)
+        {
+            for(int i = 0; i < 8; i++)
+                CuiHelper.DestroyUi(player, $"ELEMENT_{i}");
+            
+            var Interface = config.InterfaceChat;
+            var DataPlayer = ChatSettingUser[player.userID];
+            CuiElementContainer container = new CuiElementContainer();
+
+            var ElementList = Type == TakeElemntUser.Prefix || Type == TakeElemntUser.MultiPrefix ? config.PrefixList.Where(p => permission.UserHasPermission(player.UserIDString, p.Permissions)).Skip(8 * Page).ToList()
+                            : Type == TakeElemntUser.Chat ? config.MessageColorList.Where(p => permission.UserHasPermission(player.UserIDString, p.Permissions)).Skip(8 * Page).ToList()
+                            : Type == TakeElemntUser.Nick ? config.NickColorList.Where(p => permission.UserHasPermission(player.UserIDString, p.Permissions)).Skip(8 * Page).ToList() : new List<Configuration.AdvancedFuncion>();
+
+            if (Type == TakeElemntUser.Rank)
+            {
+                var RankList = IQRankListKey(player.userID).Skip(8 * Page);
+                int x = 0, y = 0, i = 0;
+                foreach (var Element in RankList)
+                {
+                    string Rank = IQRankGetNameRankKey(Element);
+                    container.Add(new CuiButton
+                    {
+                        RectTransform = { AnchorMin = $"{0 + (x * 0.504)} {0.752 - (y * 0.245)}", AnchorMax = $"{0.495 + (x * 0.504)} {0.975 - (y * 0.245)}" },
+                        Button = { Command = $"iq.chat take.element.user {Type} {i} {Page}", Color = HexToRustFormat(Interface.HexButton) },
+                        Text = { Text = Rank, Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), FontSize = 10 }
+                    }, "DROP_LIST_PANEL_ELEMENT", $"ELEMENT_{i}");
+
+                    if (i >= 7) break;
+                    x++; i++;
+                    if (x == 2)
+                    {
+                        y++;
+                        x = 0;
+                    }
+                }
+            }
+            else
+            {
+                int x = 0, y = 0, i = 0;
+                foreach (var Element in ElementList)
+                {
+                    string DisplayElement = Type == TakeElemntUser.Chat ? $"<b><color={Element.Argument}> я лучший</color></b>" : Type == TakeElemntUser.Nick ? $"<color={Element.Argument}>{player.displayName}</color>" : Element.Argument;
+                    container.Add(new CuiButton
+                    {
+                        RectTransform = { AnchorMin = $"{0 + (x * 0.504)} {0.752 - (y * 0.245)}", AnchorMax = $"{0.495 + (x * 0.504)} {0.975 - (y * 0.245)}" },
+                        Button = { Command = $"iq.chat take.element.user {Type} {i} {Page}", Color = HexToRustFormat(Interface.HexButton) },
+                        Text = { Text = DisplayElement, Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), FontSize = 10 }
+                    }, "DROP_LIST_PANEL_ELEMENT", $"ELEMENT_{i}");
+
+                    if (DataPlayer.MultiPrefix.Contains(Element.Argument) && config.MessageSetting.MultiPrefix)
+                    {
+                        container.Add(new CuiPanel
+                        {
+                            RectTransform = { AnchorMin = "0.03763337 0.1", AnchorMax = "0.1881546 0.8883512" },
+                            Image = { Color = HexToRustFormat(Interface.HexLabel), Sprite = "assets/icons/vote_up.png" }
+                        }, $"ELEMENT_{i}");
+                    }
+
+                    if (i >= 7) break;
+                    x++; i++;
+                    if (x == 2)
+                    {
+                        y++;
+                        x = 0;
+                    }
+                }
+            }
+
+            CuiHelper.AddUi(player, container);
+            LoadPage(player, Type, Type == TakeElemntUser.Rank ? IQRankListKey(player.userID).Count : ElementList.Count, Page);
+        }
+
+        void LoadPage(BasePlayer player, TakeElemntUser Type, int ElementCount, int Page = 0)
+        {
+            CuiHelper.DestroyUi(player, "PAGE_PANEL_CONTROLLER_BUTTON_BACK");
+            CuiHelper.DestroyUi(player, "BUTTON_BACK_ELEMENT");
+            CuiHelper.DestroyUi(player, "COUNT_PAGE");
+            CuiHelper.DestroyUi(player, "PAGE_PANEL_CONTROLLER_BUTTON_NEXT");
+            CuiHelper.DestroyUi(player, "BUTTON_NEXT_ELEMENT");
+
+            var Interface = config.InterfaceChat;
+            CuiElementContainer container = new CuiElementContainer();
+
+            string CommandBackPage = Page != 0 ? $"iq.chat drop.list.page.controller back {Type} {Page}" : "";
+            string ColorBackPage = Page != 0 ? Interface.HexPageButtonActive : Interface.HexPageButtonInActive;
+            string ColortNextPage = ElementCount > 8 ? Interface.HexPageButtonActive : Interface.HexPageButtonInActive;
+            string CommandNextPage = ElementCount > 8 ? $"iq.chat drop.list.page.controller next {Type} {Page}" : "";
+
+            container.Add(new CuiElement
+            {
+                Parent = "PAGE_PANEL_CONTROLLER",
+                Name = "PAGE_PANEL_CONTROLLER_BUTTON_BACK",
+                Components =
+                {
+                        new CuiImageComponent { Color = HexToRustFormat(ColorBackPage) },
+                        new CuiRectTransformComponent{ AnchorMin = $"0 0", AnchorMax = $"0.1114139 0.95" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.2", UseGraphicAlpha = true }
+                }
+            });
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = $"0 0", AnchorMax = $"1 0.92" },
+                Button = { Command = CommandBackPage, Color = "0 0 0 0" },
+                Text = { Text = $"↩", Color = HexToRustFormat(Interface.HexLabel), Font = "robotocondensed-regular.ttf", FontSize = 15, Align = TextAnchor.MiddleCenter }
+            }, "PAGE_PANEL_CONTROLLER_BUTTON_BACK", "BUTTON_BACK_ELEMENT");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.1114139 0", AnchorMax = "0.8913107 1" },
+                Text = { Text = GetLang("UI_CHAT_PAGE_CONTROLLER_DROP_LIST_COUNT", player.UserIDString, Page.ToString()), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleCenter }
+            }, "PAGE_PANEL_CONTROLLER", "COUNT_PAGE"); 
+
+            container.Add(new CuiElement
+            {
+                Parent = "PAGE_PANEL_CONTROLLER",
+                Name = "PAGE_PANEL_CONTROLLER_BUTTON_NEXT",
+                Components =
+                {
+                        new CuiImageComponent { Color = HexToRustFormat(ColortNextPage) },
+                        new CuiRectTransformComponent{ AnchorMin = $"0.8885861 0", AnchorMax = $"1 0.95" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.2", UseGraphicAlpha = true }
+                }
+            });
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = $"0 0", AnchorMax = $"1 0.92" },
+                Button = { Command = CommandNextPage, Color = "0 0 0 0" },
+                Text = { Text = $"↪", Color = HexToRustFormat(Interface.HexLabel), Font = "robotocondensed-regular.ttf", FontSize = 15, Align = TextAnchor.MiddleCenter }
+            }, "PAGE_PANEL_CONTROLLER_BUTTON_NEXT", "BUTTON_NEXT_ELEMENT");
+
+            CuiHelper.AddUi(player, container);
+        }
+        #endregion
+
+        #endregion
+
+        #region UI Mute Menu
+
+        void IQChat_UI_Mute_Menu(BasePlayer player)
+        { 
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL);
+            CuiHelper.DestroyUi(player, IQCHAT_PARENT_MAIN_IGNORED_UI);
+            var Interface = config.InterfaceChat;
+            var InterfacePosition = config.InterfaceChat.InterfacePositions.MutePanels;
+            float FadeIn = 0.3f;
+            string Parent = IQModalMenu ? IQMODAL_CONTENT : IQCHAT_PARENT_MAIN;
+            string AnchorMin = IQModalMenu ? "0.001 0" : InterfacePosition.BackgroundAnchorMin;
+            string AcnhorMax = IQModalMenu ? "0.997 1" : InterfacePosition.BackgroundAnchorMax;
+
+            container.Add(new CuiElement
+            {
+                Parent = Parent,
+                Name = IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL,
+                Components =
+                        {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexPanel) },
+                        new CuiRectTransformComponent{ AnchorMin = AnchorMin, AnchorMax = AcnhorMax },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "1.2 -1.2", UseGraphicAlpha = true }
+
+                        }
+            });
+
+            container.Add(new CuiElement
+            {
+                Parent = IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL,
+                Name = IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL_TITLE,
+                Components =
+                        {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexTitle) },
+                        new CuiRectTransformComponent{ AnchorMin = "0.001 0.8896463", AnchorMax = "0.999 1"  },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexPanel), Distance = "1.2 -1.2", UseGraphicAlpha = true }
+
+                        }
+            });
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "0.9492017 0.31899254", AnchorMax = "0.9750086 0.6709784" }, 
+                Button = { FadeIn = FadeIn, Close = IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL, Color = HexToRustFormat(Interface.HexLabel), Sprite = "assets/icons/exit.png" },
+                Text = { FadeIn = FadeIn, Text = "" }
+            }, IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL_TITLE, "CLOSE_BUTTON_MUTE");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.374989 0", AnchorMax = "0.93870254 1" }, 
+                Text = { FadeIn = FadeIn, Text = lang.GetMessage("UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TITLE", this, player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleRight }
+            }, IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL_TITLE, "TITLE_MUTE_LABEL");
+
+            #region Input Search
+
+            string SearchName = "";
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "0.01531807 0.31899", AnchorMax = "0.04112639 0.6709784" },
+                Button = { FadeIn = FadeIn, Command = $"iq.chat mute.controller search.player {SearchName}", Color = HexToRustFormat(Interface.HexLabel), Sprite = "assets/icons/examine.png" },
+                Text = { FadeIn = FadeIn, Text = "" }
+            }, IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL_TITLE, "SEARCH_BUTTON");
+
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = "0.04677023 0.31899", AnchorMax = "0.2685355 0.6709784" },
+                Image = { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexPanel), Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat" }
+            }, IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL_TITLE, "INPUT_PANEL");
+
+            container.Add(new CuiElement
+            {
+                Parent = "INPUT_PANEL",
+                Name = "INPUT_ELEMENT",
+                Components =
+                {
+                    new CuiInputFieldComponent { Text = SearchName, FontSize = 14,Command = $"iq.chat mute.controller search.player {SearchName}", Align = TextAnchor.MiddleLeft, Color = HexToRustFormat(Interface.HexLabel), CharsLimit = 25},
+                    new CuiRectTransformComponent { AnchorMin = "0.02 0", AnchorMax = "1 1" }
+                }
+            }); 
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "0.2725679 0", AnchorMax = "0.3588576 1" },
+                Button = { FadeIn = FadeIn, Command = $"iq.chat mute.controller search.player {SearchName}", Color = "0 0 0 0"},
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TITLE_SEARCH", player.UserIDString), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf" }
+            }, IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL_TITLE, "SEARCH_BUTTON_TITLE");
+
+            #endregion
+
+            CuiHelper.AddUi(player, container);
+
+            Loaded_Players_Mute_Menu(player);
+        }
+
+        void Loaded_Players_Mute_Menu(BasePlayer player, int Page = 0, string Search = "")
+        {
+            var Interface = config.InterfaceChat;
+            float FadeIn = 0.3f;
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, "TITLE_PAGE_ACTIVE");
+            CuiHelper.DestroyUi(player, "BUTTON_PAGE_NEXT");
+            CuiHelper.DestroyUi(player, "BUTTON_PAGE_BACK");
+            CuiHelper.DestroyUi(player, "IQ_CHAT_MUTE_PANEL_CONTENT");
+
+            string ColorBackPage = Page != 0 ? Interface.HexPageButtonActive : Interface.HexPageButtonInActive;
+            string CommandBackPage = Page != 0 ? $"iq.chat mute.controller page.controller back {Page} {Search}" : ""; 
+
+            string ColortNextPage = BasePlayer.activePlayerList.Skip(70 * (Page + 1)).Count() > 0 ? Interface.HexPageButtonActive : Interface.HexPageButtonInActive;
+            string CommandNextPage = BasePlayer.activePlayerList.Skip(70 * (Page + 1)).Count() > 0 ? $"iq.chat mute.controller page.controller next {Page} {Search}" : "";
+
+            #region Page Mute Players
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.3975857 0.31899254", AnchorMax = "0.4233935 0.6709784" }, 
+                Text = { FadeIn = FadeIn, Text = Page.ToString(), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleCenter, FontSize = 16 }
+            }, IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL_TITLE, "TITLE_PAGE_ACTIVE");
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "0.4274257 0.3189905", AnchorMax = "0.453233 0.6709783" },
+                Button = { FadeIn = FadeIn, Command = CommandNextPage, Color = HexToRustFormat(ColortNextPage) },
+                Text = { FadeIn = FadeIn, Text = "<b>></b>", FontSize = 16, Align = TextAnchor.MiddleCenter, Color = HexToRustFormat(Interface.HexLabel)}
+            }, IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL_TITLE, "BUTTON_PAGE_NEXT");
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "0.3677455 0.31899", AnchorMax = "0.3935539 0.6709784" },
+                Button = { FadeIn = FadeIn, Command = CommandBackPage, Color = HexToRustFormat(ColorBackPage) },
+                Text = { FadeIn = FadeIn, Text = "<b><</b>", FontSize = 16, Align = TextAnchor.MiddleCenter, Color = HexToRustFormat(Interface.HexLabel) }
+            }, IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL_TITLE, "BUTTON_PAGE_BACK");
+
+            #endregion
+
+            #region Players
+
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0.8896463" },
+                Image = { FadeIn = FadeIn, Color = "0 0 0 0" }
+            }, IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL, "IQ_CHAT_MUTE_PANEL_CONTENT");
+
+            int x = 0, y = 0, i = 0;
+            foreach(BasePlayer PlayerList in BasePlayer.activePlayerList.Where(p => p.displayName.ToLower().Contains(Search.ToLower())).Skip(70 * Page).OrderByDescending(p => IsMutedUser(p.userID)))
+            {
+                string Command = $"iq.chat mute.controller take.user take {PlayerList.userID}";
+                container.Add(new CuiElement
+                {
+                    Parent = "IQ_CHAT_MUTE_PANEL_CONTENT",
+                    Name = $"PLAYER_PANEL_{i}",
+                    Components =
+                        {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexButton) },
+                        new CuiRectTransformComponent{ AnchorMin = $"{0.0120794 + (x * 0.1987)} {0.9345078 - (y * 0.07)}", AnchorMax = $"{0.1903083 + (x * 0.1987)} {0.983627 - (y * 0.07)}" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "1.2 -1.2", UseGraphicAlpha = true }
+
+                        }
+                });
+                string Indication = IsMutedUser(PlayerList.userID) ? "#cd4632" : Interface.HexTitle;
+                container.Add(new CuiPanel
+                {
+                    RectTransform = { AnchorMin = "0 0.0191", AnchorMax = "0.02041666 0.955" },
+                    Image = { FadeIn = FadeIn, Color = HexToRustFormat(Indication) }
+                }, $"PLAYER_PANEL_{i}", $"PLAYER_LINE_{i}");
+
+                string FormatNick = PlayerList.displayName.Length > 23 ? $"{PlayerList.displayName.Substring(0, 23)}..." : PlayerList.displayName;
+                container.Add(new CuiButton
+                {
+                    RectTransform = { AnchorMin = "0.05687201 0", AnchorMax = "0.9638011 1" },
+                    Button = { FadeIn = FadeIn, Color = "0 0 0 0", Command = Command },
+                    Text = { FadeIn = FadeIn, Text = FormatNick, FontSize = 12, Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleLeft }
+                }, $"PLAYER_PANEL_{i}", $"BUTTON_MUTE_PLAYER_{i}");
+
+                i++;
+                if (i == 70) break;
+                x++;
+                if (x == 5)
+                {
+                    x = 0;
+                    y++;
+                }
+            }
+
+            #endregion
+
+            CuiHelper.AddUi(player, container);
+        }
+
+        #region Mute Take User
+
+        void Take_User_Mute_Menu(BasePlayer player, ulong TargetUserID)
+        {
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, "IQ_MUTE_BLUR_CONTENT");
+            var Interface = config.InterfaceChat;
+            float FadeIn = 0.3f;
+            string ChatType = IsMutedUser(TargetUserID) ? "UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_CHAT_UNMUTE" : "UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_CHAT";
+            string VoiceType = IsMutedVoiceUser(TargetUserID) ? "UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_VOICE_UNMUTE" : "UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_VOICE";
+            string CommandChatType = IsMutedUser(TargetUserID) ? $"iq.chat mute.controller take.user user.action {TargetUserID} unmute {MuteType.Chat}" : $"iq.chat mute.controller take.user take.type {MuteType.Chat} {TargetUserID}"; 
+            string CommandVoiceType = IsMutedVoiceUser(TargetUserID) ? $"iq.chat mute.controller take.user user.action {TargetUserID} unmute {MuteType.Voice}" : $"iq.chat mute.controller take.user take.type {MuteType.Voice} {TargetUserID}";
+
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0", OffsetMin = "0 0" },
+                Image = { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexBlurMute), Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat" }
+            }, "IQ_CHAT_MUTE_PANEL_CONTENT", "IQ_MUTE_BLUR_CONTENT");
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                Button = { FadeIn = FadeIn, Close = "IQ_MUTE_BLUR_CONTENT", Color = "0 0 0 0" },
+                Text = { FadeIn = FadeIn, Text = "" }
+            }, "IQ_MUTE_BLUR_CONTENT", "CLOSE_BUTTON_MUTE_BLUR_CONTENT");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.2 0.8526422", AnchorMax = "0.8 0.9249566" },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_MUTE_TITLE", player.UserIDString), Color = HexToRustFormat(Interface.HexLabel), Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter}
+            }, "IQ_MUTE_BLUR_CONTENT", "CLOSE_BUTTON_MUTE_BLUR_CONTENT_TYPE_TITLE");
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "0.3 0.7748709", AnchorMax = "0.7 0.8471852" },
+                Button = { FadeIn = FadeIn, Command = CommandChatType, Color = HexToRustFormat(Interface.HexButton) },
+                Text = { FadeIn = FadeIn, Text = GetLang(ChatType, player.UserIDString), Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf" }
+            }, "IQ_MUTE_BLUR_CONTENT", "BUTTON_TAKE_TYPE_CHAT");
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "0.3 0.6970995", AnchorMax = "0.7 0.7694138" },
+                Button = { FadeIn = FadeIn, Command = CommandVoiceType, Color = HexToRustFormat(Interface.HexButton) },
+                Text = { FadeIn = FadeIn, Text = GetLang(VoiceType, player.UserIDString), Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf" }
+            }, "IQ_MUTE_BLUR_CONTENT", "BUTTON_TAKE_TYPE_VOICE");
+
+            CuiHelper.AddUi(player, container);
+        }
+
+        void Take_Reason_Mute_Menu(BasePlayer player, MuteType Type, ulong TargetUserID)
+        {
+            CuiElementContainer container = new CuiElementContainer();
+            var Interface = config.InterfaceChat;
+            float FadeIn = 0.3f;
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.2 0.6179637", AnchorMax = "0.8 0.6902781" },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_REASON_MUTE_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleCenter }
+            }, "IQ_MUTE_BLUR_CONTENT", "CLOSE_BUTTON_MUTE_BLUR_CONTENT_REASON_TITLE");
+
+            for(int i = 0; i < config.MuteControllers.ReasonListChat.Count; i++)
+            {
+                var ReasonInfo = config.MuteControllers.ReasonListChat[i];
+                string Command = $"iq.chat mute.controller take.user user.action {TargetUserID} mute {Type} {i}"; 
+                container.Add(new CuiButton
+                {
+                    RectTransform = { AnchorMin = $"0.3 {0.5442856 - (i * 0.077)}", AnchorMax = $"0.7 {0.6165999 - (i * 0.077)}" },
+                    Button = { FadeIn = FadeIn, Command = Command, Color = HexToRustFormat(Interface.HexButton) },
+                    Text = { FadeIn = FadeIn, Text = $"{ReasonInfo.Reason} - {FormatTime(TimeSpan.FromSeconds(ReasonInfo.TimeMute))}", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf" }
+                }, "IQ_MUTE_BLUR_CONTENT", "BUTTON_TAKE_TYPE_VOICE");
+            }
+
+            CuiHelper.AddUi(player, container);
+        }
+
+        void AlertController(BasePlayer player, string LangKey, bool MuteOrIgnored = true)
+        {
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, "IQ_IGNORED_BLUR_CONTENT");
+            CuiHelper.DestroyUi(player, "IQ_MUTE_BLUR_CONTENT");
+            var Interface = config.InterfaceChat;
+            float FadeIn = 0.3f;
+
+            string Message = GetLang(LangKey, player.UserIDString);
+            string Parent = MuteOrIgnored ? "IQ_CHAT_MUTE_PANEL_CONTENT" : "IQ_CHAT_IGNORED_PANEL_CONTENT";
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0", OffsetMin = "0 0" },
+                Image = { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexBlurMute), Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat" }
+            },  Parent, "IQ_MUTE_BLUR_CONTENT");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                Text = { FadeIn = FadeIn, Text = Message, Color = HexToRustFormat(Interface.HexLabel), Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter }
+            }, "IQ_MUTE_BLUR_CONTENT", "MUTE_ACCESS_LABEL_INFO");
+
+            timer.Once(3f, () => {
+                if (MuteOrIgnored)
+                    Loaded_Players_Mute_Menu(player);
+                else UI_Ignored_Loaded_Players(player);
+            });
+
+            CuiHelper.AddUi(player, container);
+        }
+
+
+        #endregion
+
+        #endregion
+
+        #region UI Ignored Menu
+
+        private void UI_Ignored_Menu(BasePlayer player)
+        {
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL);
+            CuiHelper.DestroyUi(player, IQCHAT_PARENT_MAIN_IGNORED_UI_TITLE);
+            CuiHelper.DestroyUi(player, IQCHAT_PARENT_MAIN_IGNORED_UI);
+            var Interface = config.InterfaceChat;
+            var InterfacePosition = Interface.InterfacePositions.IgnoredPanels;
+            float FadeIn = 0.3f;
+
+            string Parent = IQModalMenu ? IQMODAL_CONTENT : IQCHAT_PARENT_MAIN;
+            string AnchorMin = IQModalMenu ? "0.001 0" : InterfacePosition.BackgroundAnchorMin;
+            string AcnhorMax = IQModalMenu ? "0.997 1" : InterfacePosition.BackgroundAnchorMax;
+
+            container.Add(new CuiElement
+            {
+                Parent = Parent,
+                Name = IQCHAT_PARENT_MAIN_IGNORED_UI,
+                Components =
+                        {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexPanel) },
+                        new CuiRectTransformComponent{ AnchorMin = AnchorMin, AnchorMax = AcnhorMax },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "1.2 -1.2", UseGraphicAlpha = true }
+
+                        }
+            });
+
+            container.Add(new CuiElement
+            {
+                Parent = IQCHAT_PARENT_MAIN_IGNORED_UI,
+                Name = IQCHAT_PARENT_MAIN_IGNORED_UI_TITLE,
+                Components =
+                        {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexTitle) },
+                        new CuiRectTransformComponent{ AnchorMin = "0.001 0.8896463", AnchorMax = "0.999 1"  },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexPanel), Distance = "1.2 -1.2", UseGraphicAlpha = true }
+
+                        }
+            });
+
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "0.9492017 0.31899", AnchorMax = "0.9750086 0.6709784" },
+                Button = { FadeIn = FadeIn, Close = IQCHAT_PARENT_MAIN_IGNORED_UI, Color = HexToRustFormat(Interface.HexLabel), Sprite = "assets/icons/exit.png" },
+                Text = { FadeIn = FadeIn, Text = "" }
+            }, IQCHAT_PARENT_MAIN_IGNORED_UI_TITLE, "CLOSE_BUTTON_IGNORED");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.374989 0", AnchorMax = "0.9387087 1" },
+                Text = { FadeIn = FadeIn, Text = lang.GetMessage("UI_CHAT_PANEL_IGNORED_MENU_TITLE", this, player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleRight }
+            }, IQCHAT_PARENT_MAIN_IGNORED_UI_TITLE, "TITLE_IGNORED_LABEL");
+
+            #region Input Search
+
+            string SearchName = "";
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "0.01531807 0.31899", AnchorMax = "0.04112639 0.6709784" },
+                Button = { FadeIn = FadeIn, Command = $"iq.chat ignore.controller search.player {SearchName}", Color = HexToRustFormat(Interface.HexLabel), Sprite = "assets/icons/examine.png" },
+                Text = { FadeIn = FadeIn, Text = "" }
+            }, IQCHAT_PARENT_MAIN_IGNORED_UI_TITLE, "SEARCH_BUTTON");
+
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = "0.04677023 0.31899", AnchorMax = "0.2685355 0.6709784" },
+                Image = { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexPanel), Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat" }
+            }, IQCHAT_PARENT_MAIN_IGNORED_UI_TITLE, "INPUT_PANEL");
+
+            container.Add(new CuiElement
+            {
+                Parent = "INPUT_PANEL",
+                Name = "INPUT_ELEMENT",
+                Components =
+                {
+                    new CuiInputFieldComponent { Text = SearchName, FontSize = 14,Command = $"iq.chat ignore.controller search.player {SearchName}", Align = TextAnchor.MiddleLeft, Color = HexToRustFormat(Interface.HexLabel), CharsLimit = 25},
+                    new CuiRectTransformComponent { AnchorMin = "0.02 0", AnchorMax = "1 1" }
+                }
+            });
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "0.2725679 0", AnchorMax = "0.3588576 1" },
+                Button = { FadeIn = FadeIn, Command = $"iq.chat ignore.controller search.player {SearchName}", Color = "0 0 0 0" },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TITLE_SEARCH", player.UserIDString), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf" }
+            }, IQCHAT_PARENT_MAIN_IGNORED_UI_TITLE, "SEARCH_BUTTON_TITLE");
+
+            #endregion
+
+            CuiHelper.AddUi(player, container);
+
+            UI_Ignored_Loaded_Players(player);
+        }
+
+        private void UI_Ignored_Loaded_Players(BasePlayer player, int Page = 0, string Search = "")
+        {
+            var ChatUser = ChatSettingUser[player.userID];
+            var Interface = config.InterfaceChat;
+            float FadeIn = 0.3f;
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, "TITLE_PAGE_ACTIVE");
+            CuiHelper.DestroyUi(player, "BUTTON_PAGE_NEXT");
+            CuiHelper.DestroyUi(player, "BUTTON_PAGE_BACK");
+            CuiHelper.DestroyUi(player, "IQ_CHAT_IGNORED_PANEL_CONTENT");
+
+            string ColorBackPage = Page != 0 ? Interface.HexPageButtonActive : Interface.HexPageButtonInActive;
+            string CommandBackPage = Page != 0 ? $"iq.chat ignore.controller page.controller back {Page} {Search}" : "";
+
+            string ColortNextPage = BasePlayer.activePlayerList.Skip(70 * (Page + 1)).Count() > 0 ? Interface.HexPageButtonActive : Interface.HexPageButtonInActive;
+            string CommandNextPage = BasePlayer.activePlayerList.Skip(70 * (Page + 1)).Count() > 0 ? $"iq.chat ignore.controller page.controller next {Page} {Search}" : "";
+
+            #region Page Ignored Players
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.3975857 0.31899", AnchorMax = "0.4233935 0.6709784" },
+                Text = { FadeIn = FadeIn, Text = Page.ToString(), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleCenter, FontSize = 16 }
+            }, IQCHAT_PARENT_MAIN_IGNORED_UI_TITLE, "TITLE_PAGE_ACTIVE");
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "0.4274257 0.3189905", AnchorMax = "0.453233 0.6709783" },
+                Button = { FadeIn = FadeIn, Command = CommandNextPage, Color = HexToRustFormat(ColortNextPage) },
+                Text = { FadeIn = FadeIn, Text = "<b>></b>", FontSize = 16, Align = TextAnchor.MiddleCenter, Color = HexToRustFormat(Interface.HexLabel) }
+            }, IQCHAT_PARENT_MAIN_IGNORED_UI_TITLE, "BUTTON_PAGE_NEXT");
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "0.3677455 0.31899", AnchorMax = "0.3935539 0.6709784" },
+                Button = { FadeIn = FadeIn, Command = CommandBackPage, Color = HexToRustFormat(ColorBackPage) },
+                Text = { FadeIn = FadeIn, Text = "<b><</b>", FontSize = 16, Align = TextAnchor.MiddleCenter, Color = HexToRustFormat(Interface.HexLabel) }
+            }, IQCHAT_PARENT_MAIN_IGNORED_UI_TITLE, "BUTTON_PAGE_BACK");
+
+            #endregion
+
+            #region Players
+
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0.8896463" },
+                Image = { FadeIn = FadeIn, Color = "0 0 0 0" }
+            }, IQCHAT_PARENT_MAIN_IGNORED_UI, "IQ_CHAT_IGNORED_PANEL_CONTENT");
+
+            int x = 0, y = 0, i = 0;
+            foreach (BasePlayer PlayerList in BasePlayer.activePlayerList.Where(p => p.displayName.ToLower().Contains(Search.ToLower())).Skip(70 * Page).OrderByDescending(p => IsIgnored(player.userID, p.userID)))
+            {
+                string Command = $"iq.chat ignore.controller take.user take {PlayerList.userID}";
+                container.Add(new CuiElement
+                {
+                    Parent = "IQ_CHAT_IGNORED_PANEL_CONTENT",
+                    Name = $"PLAYER_PANEL_{i}",
+                    Components =
+                        {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexButton) },
+                        new CuiRectTransformComponent{ AnchorMin = $"{0.0120794 + (x * 0.1987)} {0.9345078 - (y * 0.07)}", AnchorMax = $"{0.1903083 + (x * 0.1987)} {0.983627 - (y * 0.07)}" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "1.2 -1.2", UseGraphicAlpha = true }
+
+                        }
+                });
+
+                string Indication = IsIgnored(player.userID,PlayerList.userID) ? "#cd4632" : Interface.HexTitle;
+                container.Add(new CuiPanel
+                {
+                    RectTransform = { AnchorMin = "0 0.0191", AnchorMax = "0.02041666 0.955" },
+                    Image = { FadeIn = FadeIn, Color = HexToRustFormat(Indication) }
+                }, $"PLAYER_PANEL_{i}", $"PLAYER_LINE_{i}");            
+
+                string FormatNick = PlayerList.displayName.Length > 23 ? $"{PlayerList.displayName.Substring(0, 23)}..." : PlayerList.displayName;
+                container.Add(new CuiButton
+                {
+                    RectTransform = { AnchorMin = "0.05687201 0", AnchorMax = "0.9638011 1" },
+                    Button = { FadeIn = FadeIn, Color = "0 0 0 0", Command = Command },
+                    Text = { FadeIn = FadeIn, Text = FormatNick, FontSize = 12, Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleLeft }
+                }, $"PLAYER_PANEL_{i}", $"BUTTON_IGNORED_PLAYER_{i}");
+
+                i++;
+                if (i == 70) break;
+                x++;
+                if (x == 5)
+                {
+                    x = 0;
+                    y++;
+                }
+            }
+
+            #endregion
+
+            CuiHelper.AddUi(player, container);
+        }
+
+        #region UI Ignored Alert
+
+        void Take_User_Ignored_Menu(BasePlayer player, ulong TargetUserID)
+        {
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, "IQ_IGNORED_BLUR_CONTENT");
+            var Interface = config.InterfaceChat;
+            float FadeIn = 0.3f;
+
+            string AlertMessage = !IsIgnored(player.userID, TargetUserID) ? GetLang("UI_CHAT_PANEL_IGNORED_MENU_TITLE_ALERT_ADD_IGNORED", player.UserIDString, BasePlayer.FindByID(TargetUserID).displayName.ToUpper()) : GetLang("UI_CHAT_PANEL_IGNORED_MENU_TITLE_ALERT_REMOVE_IGNORED", player.UserIDString, BasePlayer.FindByID(TargetUserID).displayName.ToUpper());
+
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0", OffsetMin = "0 0" },
+                Image = { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexBlurMute), Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat" }
+            }, "IQ_CHAT_IGNORED_PANEL_CONTENT", "IQ_IGNORED_BLUR_CONTENT");
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                Button = { FadeIn = FadeIn, Close = "IQ_IGNORED_BLUR_CONTENT", Color = "0 0 0 0" },
+                Text = { FadeIn = FadeIn, Text = "" }
+            }, "IQ_IGNORED_BLUR_CONTENT", "CLOSE_BUTTON_IGNORED_BLUR_CONTENT");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0 0.7216589", AnchorMax = "1 0.916771" },
+                Text = { FadeIn = FadeIn, Text = AlertMessage, Color = HexToRustFormat(Interface.HexLabel), Font = "robotocondensed-regular.ttf", Align = TextAnchor.MiddleCenter }
+            }, "IQ_IGNORED_BLUR_CONTENT", "CLOSE_BUTTON_MUTE_BLUR_CONTENT_TYPE_TITLE");
+            
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "0.08385485 0.6206912", AnchorMax = "0.4749908 0.6930054" },
+                Button = { FadeIn = FadeIn, Command = $"iq.chat ignore.controller take.user user.confirm {TargetUserID} yes", Color = HexToRustFormat(Interface.HexButton) },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_IGNORED_MENU_TITLE_ALERT_YES_BUTTON", player.UserIDString), Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf" }
+            }, "IQ_IGNORED_BLUR_CONTENT", "BUTTON_ALERT_IGNORED_YES");
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = "0.5250092 0.6206912", AnchorMax = "0.9161451 0.6930054" },
+                Button = { FadeIn = FadeIn, Command = $"iq.chat ignore.controller take.user user.confirm {TargetUserID} no", Color = HexToRustFormat(Interface.HexButton) },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_IGNORED_MENU_TITLE_ALERT_NO_BUTTON", player.UserIDString), Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf" }
+            }, "IQ_IGNORED_BLUR_CONTENT", "BUTTON_ALERT_IGNORED_NO");
+
+            CuiHelper.AddUi(player, container);
+        }
+
+        #endregion
+
+        #endregion
+
+        #region Settings Turned
+
+        void TurnedPM(BasePlayer player)
+        {
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, "TURNED_PM");
+
+            float FadeIn = 0.3f;
+            var Interface = config.InterfaceChat;
+            var Data = ChatSettingUser[player.userID];
+            string Sprite = Data.PMTurn ? "assets/icons/vote_up.png" : "assets/icons/vote_down.png";
+            string Command = Data.PMTurn ? "iq.chat setting turned.pm false" : "iq.chat setting turned.pm true";
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = $"0 0", AnchorMax = $"1 1" },
+                Button = { FadeIn = FadeIn, Command = Command, Sprite = Sprite, Color = HexToRustFormat(Interface.HexLabel) },
+                Text = { FadeIn = FadeIn, Text = "" }
+            },  "TURNED_PM_BOX", "TURNED_PM");
+
+            CuiHelper.AddUi(player, container);
+        }
+
+        void TurnedBroadcast(BasePlayer player)
+        {
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, "TURNED_BROADCAST");
+
+            float FadeIn = 0.3f;
+            var Interface = config.InterfaceChat;
+            var Data = ChatSettingUser[player.userID];
+            string Sprite = Data.BroadcastTurn ? "assets/icons/vote_up.png" : "assets/icons/vote_down.png";
+            string Command = Data.BroadcastTurn ? "iq.chat setting turned.broadcast false" : "iq.chat setting turned.broadcast true";
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = $"0 0", AnchorMax = $"1 1" },
+                Button = { FadeIn = FadeIn, Command = Command, Sprite = Sprite, Color = HexToRustFormat(Interface.HexLabel) },
+                Text = { FadeIn = FadeIn, Text = "" }
+            }, "TURNED_BROADCAST_BOX", "TURNED_BROADCAST");
+
+            CuiHelper.AddUi(player, container);
+        }     
+
+        void TurnedSound(BasePlayer player)
+        {
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, "TURNED_SOUND");
+
+            float FadeIn = 0.3f;
+            var Interface = config.InterfaceChat;
+            var Data = ChatSettingUser[player.userID];
+            string Sprite = Data.SoundTurn ? "assets/icons/vote_up.png" : "assets/icons/vote_down.png";
+            string Command = Data.SoundTurn ? "iq.chat setting turned.sound false" : "iq.chat setting turned.sound true";
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = $"0 0", AnchorMax = $"1 1" },
+                Button = { FadeIn = FadeIn, Command = Command, Sprite = Sprite, Color = HexToRustFormat(Interface.HexLabel) },
+                Text = { FadeIn = FadeIn, Text = "" }
+            }, "TURNED_SOUND_BOX", "TURNED_SOUND");
+
+            CuiHelper.AddUi(player, container);
+        }
+
+        void TurnedGlobalChat(BasePlayer player)
+        {
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, "TURNED_GLOBAL_CHAT");
+
+            float FadeIn = 0.3f;
+            var Interface = config.InterfaceChat;
+            var Data = ChatSettingUser[player.userID];
+            string Sprite = Data.GlobalChatTurn ? "assets/icons/vote_up.png" : "assets/icons/vote_down.png";
+            string Command = Data.GlobalChatTurn ? "iq.chat setting turned.globalchat false" : "iq.chat setting turned.globalchat true";
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = $"0 0", AnchorMax = $"1 1" },
+                Button = { FadeIn = FadeIn, Command = Command, Sprite = Sprite, Color = HexToRustFormat(Interface.HexLabel) },
+                Text = { FadeIn = FadeIn, Text = "" }
+            }, "TURNED_GLOBAL_CHAT_BOX", "TURNED_GLOBAL_CHAT");
+
+            CuiHelper.AddUi(player, container);
+        }
+
+        void TurnedAlert(BasePlayer player)
+        {
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, "TURNED_ALERT");
+
+            float FadeIn = 0.3f;
+            var Interface = config.InterfaceChat;
+            var Data = ChatSettingUser[player.userID];
+            string Sprite = Data.AlertTurn ? "assets/icons/vote_up.png" : "assets/icons/vote_down.png";
+            string Command = Data.AlertTurn ? "iq.chat setting turned.alert false" : "iq.chat setting turned.alert true";
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = $"0 0", AnchorMax = $"1 1" },
+                Button = { FadeIn = FadeIn, Command = Command, Sprite = Sprite, Color = HexToRustFormat(Interface.HexLabel) },
+                Text = { FadeIn = FadeIn, Text = "" }
+            },  "TURNED_ALERT_BOX", "TURNED_ALERT");
+
+            CuiHelper.AddUi(player, container);
+        }
+
+        void TurnedAdminButtonMuteAllChat(BasePlayer Admin)
+        {
+            float FadeIn = 0.3f;
+            var Interface = config.InterfaceChat;
+
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(Admin, "TITLE_LABEL_PANEL_MODERATION_BUTTON_MUTE_ALL_CHAT");
+
+            string MessageMuteAllChat = !AdminSetting.MuteChatAll ? "UI_CHAT_PANEL_MODERATOR_MUTE_CHAT_ALL_BUTTON_TITLE" : "UI_CHAT_PANEL_MODERATOR_UNMUTE_CHAT_ALL_BUTTON_TITLE";
+            string CommandMuteAllChat = !AdminSetting.MuteChatAll ? $"iq.chat mute.controller mute.all.players {MuteType.Chat}" : $"iq.chat mute.controller unmute.all.players {MuteType.Chat}";
+            string AnchorMin = IQModalMenu ? "0.04152405 0.2455987" : Interface.InterfacePositions.MainPanels.ModerationBlock.ButtonMuteAllAnchorMin;
+            string AnchorMax = IQModalMenu ? "0.4782379 0.3165501" : Interface.InterfacePositions.MainPanels.ModerationBlock.ButtonMuteAllAnchorMax;
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = AnchorMin, AnchorMax = AnchorMax },
+                Button = { FadeIn = FadeIn, Command = CommandMuteAllChat, Color = HexToRustFormat(Interface.HexButton) },
+                Text = { FadeIn = FadeIn, Text = GetLang(MessageMuteAllChat, Admin.UserIDString), Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleCenter }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_PANEL_MODERATION_BUTTON_MUTE_ALL_CHAT");
+
+            CuiHelper.AddUi(Admin, container);
+        }
+        void TurnedAdminButtonMuteAllVoice(BasePlayer Admin)
+        {
+            float FadeIn = 0.3f;
+            var Interface = config.InterfaceChat;
+
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(Admin, "TITLE_LABEL_PANEL_MODERATION_BUTTON_MUTE_ALL_VOICE");
+
+            string MessageMuteAllVoice = !AdminSetting.MuteVoiceAll ? "UI_CHAT_PANEL_MODERATOR_MUTE_VOICE_ALL_BUTTON_TITLE" : "UI_CHAT_PANEL_MODERATOR_UNMUTE_VOICE_ALL_BUTTON_TITLE";
+            string CommandMuteAllVoice = !AdminSetting.MuteVoiceAll ? $"iq.chat mute.controller mute.all.players {MuteType.Voice}" : $"iq.chat mute.controller unmute.all.players {MuteType.Voice}";
+            string AnchorMin = IQModalMenu ? "0.4802379 0.2455987" : Interface.InterfacePositions.MainPanels.ModerationBlock.ButtonMuteVoiceAllAnchorMin;
+            string AnchorMax = IQModalMenu ? "0.9584759 0.3165501" : Interface.InterfacePositions.MainPanels.ModerationBlock.ButtonMuteVoiceAllAnchorMax;
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = AnchorMin, AnchorMax = AnchorMax },
+                Button = { FadeIn = FadeIn, Command = CommandMuteAllVoice, Color = HexToRustFormat(Interface.HexButton) },
+                Text = { FadeIn = FadeIn, Text = GetLang(MessageMuteAllVoice, Admin.UserIDString), Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleCenter }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_PANEL_MODERATION_BUTTON_MUTE_ALL_VOICE");
+
+            CuiHelper.AddUi(Admin, container);
+        }
+        #endregion
+
+        #region Inforamtion
+
+        void UpdateNick(BasePlayer player)
+        {
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, "TITLE_LABEL_INFORMATION_MY_NICK");
+
+            float FadeIn = 0.3f;
+            var Interface = config.InterfaceChat;
+            var DataPlayer = ChatSettingUser[player.userID];
+
+            string Prefix = string.Empty;
+            string Rank = IQRankSystem ? config.ReferenceSetting.IQRankSystems.UseRankSystem ? IQRankGetRank(player.userID) : string.Empty : string.Empty;
+            if (config.MessageSetting.MultiPrefix)
+            {
+                if (DataPlayer.MultiPrefix != null)
+                    for (int i = 0; i < DataPlayer.MultiPrefix.Count; i++)
+                        Prefix += DataPlayer.MultiPrefix[i];
+            }
+            else Prefix = DataPlayer.ChatPrefix;
+            string ResultNick = !String.IsNullOrEmpty(Rank) ? $"<b>[{Rank}] {Prefix}<color={DataPlayer.NickColor}>{player.displayName}</color> : <color={DataPlayer.MessageColor}> я лучший</color></b>" : $"<b>{Prefix}<color={DataPlayer.NickColor}>{player.displayName}</color> : <color={DataPlayer.MessageColor}> я лучший</color></b>";
+            int Size = ResultNick.Length >= 300 ? 7 : ResultNick.Length >= 200 ? 10 : ResultNick.Length >= 100 ? 15 : 20;
+
+            container.Add(new CuiLabel 
+            {
+                RectTransform = { AnchorMin = Interface.InterfacePositions.MainPanels.InfromationBlock.NickPlayerAnchorMin, AnchorMax = Interface.InterfacePositions.MainPanels.InfromationBlock.NickPlayerAnchorMax },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_INFORMATION_NICK_TITLE", player.UserIDString, $"<size={Size}>{ResultNick}</size>"), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_INFORMATION_MY_NICK");
+
+            CuiHelper.AddUi(player, container);
+        }
+
+        #endregion
+
+        #region UI Alert
+        void UIAlert(BasePlayer player, string Message)
+        {
+            if (XDNotifications && config.ReferenceSetting.XDNotificationsSettings.UseXDNotifications)
+            {
+                AddNotify(player, lang.GetMessage("UI_ALERT_TITLE", this, player.UserIDString), Message);
+                return;
+            }
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, IQCHAT_PARENT_ALERT_UI);
+            var Interface = config.InterfaceChat;
+            var Transform = config.InterfaceChat.AlertInterfaceSetting;
+            float FadeIn = 0.3f;
+
+            container.Add(new CuiElement
+            {
+                Parent = "Overlay",
+                Name = IQCHAT_PARENT_ALERT_UI,
+                Components =
+                        {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexPanel) },
+                        new CuiRectTransformComponent{ AnchorMin = Transform.AnchorMin, AnchorMax = Transform.AnchorMax, OffsetMin = Transform.OffsetMin, OffsetMax = Transform.OffsetMax },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "1.3 -1.2", UseGraphicAlpha = true }
+
+                        }
+            });
+
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "0.01041666 1" },
+                Image = { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexButton) }
+            }, IQCHAT_PARENT_ALERT_UI, "LINE_ALERT");
+
+            container.Add(new CuiElement
+            {
+                Parent = IQCHAT_PARENT_ALERT_UI,
+                Name = "SPRITE_ALERT",
+                Components =
+                    {
+                        new CuiImageComponent { FadeIn = FadeIn,  Color = HexToRustFormat(Interface.HexLabel), Sprite = "assets/icons/player_assist.png" },
+                        new CuiRectTransformComponent { AnchorMin = "0.03333334 0.2800003", AnchorMax = "0.1 0.7066669" }
+                    }
+            });
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.1208334 0.5866671", AnchorMax = "0.8687501 0.933333" },
+                Text = { FadeIn = FadeIn, Text = lang.GetMessage("UI_ALERT_TITLE", this, player.UserIDString), Color = HexToRustFormat(Interface.HexLabel), Font = "robotocondensed-bold.ttf", Align = TextAnchor.UpperLeft }
+            },  IQCHAT_PARENT_ALERT_UI, "IQ_ALERT_TITLE");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.1208334 0.1066661", AnchorMax = "0.9666667 0.5733335" },
+                Text = { FadeIn = FadeIn, Text = Message, FontSize = 10, Color = HexToRustFormat(Interface.HexLabel), Font = "robotocondensed-bold.ttf", Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_ALERT_UI, "IQ_ALERT_TITLE_MESSAGE");
+
+            CuiHelper.AddUi(player, container);
+
+            timer.Once(config.MessageSetting.TimeDeleteAlertUI, () =>
+            {
+                CuiHelper.DestroyUi(player, IQCHAT_PARENT_ALERT_UI);
+            });
+        }
+        #endregion
+
+        #endregion
+
+        #endregion
+
+        #region Command
+
+        #region UsingCommand
+        
+        #region Hide Mute
+
+        [ConsoleCommand("hmute")]
+        void HideMuteConsole(ConsoleSystem.Arg arg)
+        {
+            if (arg.Player() != null)
+                if (!permission.UserHasPermission(arg.Player().UserIDString, PermMuteMenu)) return;
+
+            if (arg == null || arg.Args == null || arg.Args.Length != 3 || arg.Args.Length > 3)
+            {
+                PrintWarning("Неверный синтаксис,используйте : hmute Steam64ID Причина Время(секунды)");
+                return;
+            }
+            string NameOrID = arg.Args[0];
+            string Reason = arg.Args[1];
+            int TimeMute = int.Parse(arg.Args[2]);
+            BasePlayer target = BasePlayer.Find(NameOrID);
+            if (target == null)
+            {
+                PrintWarning("Такого игрока нет на сервере");
+                return;
+            }
+
+            MutePlayer(target, MuteType.Chat, 0, arg.Player(), Reason, TimeMute, true, true);
+        }
+
+        [ChatCommand("hmute")]
+        void HideMute(BasePlayer Moderator, string cmd, string[] arg)
+        {
+            if (!permission.UserHasPermission(Moderator.UserIDString, PermMuteMenu)) return;
             if (arg == null || arg.Length != 3 || arg.Length > 3)
             {
-                ReplySystem(Moderator, LanguageEn ? "Invalid syntax, use : mute Steam64ID/Nick Reason Time(seconds)" : "Неверный синтаксис, используйте : mute Steam64ID/Ник Причина Время(секунды)");
+                ReplySystem(Chat.ChatChannel.Global, Moderator, "Неверный синтаксис,используйте : hmute Steam64ID/Ник Причина Время(секунды)");
                 return;
             }
             string NameOrID = arg[0];
             string Reason = arg[1];
-            Int32 TimeMute = 0;
-            if (!Int32.TryParse(arg[2], out TimeMute))
-            {
-                ReplySystem(Moderator, LanguageEn ? "Enter time in numbers!" : "Введите время цифрами!");
-                return;
-            }
-            
-            if (IsFakeUser(NameOrID))
-            {
-                List<FakePlayer> playerList = GetCombinedPlayerList();
-                if (playerList != null)
-                {
-                    FakePlayer fakeUser = playerList.FirstOrDefault(x => x.userId.Equals(NameOrID) || x.displayName.ToLower().Contains(NameOrID.ToLower()));
-                    if (fakeUser != null)
-                        MutePlayer(null, MuteType.Chat, 0, Moderator, Reason, TimeMute, false, true, fakeUser.userId);
-                }
-                return;
-            }
-            
-            BasePlayer target = GetPlayerNickOrID(NameOrID);
+            int TimeMute = int.Parse(arg[2]);
+            BasePlayer target = BasePlayer.Find(NameOrID);
             if (target == null)
             {
-                UInt64 Steam64ID = 0;
-                if (UInt64.TryParse(NameOrID, out Steam64ID))
-                {
-                    if (UserInformation.ContainsKey(Steam64ID))
-                    {
-                        User Info = UserInformation[Steam64ID];
-                        if (Info == null) return;
-                        if (Info.MuteInfo.IsMute(MuteType.Chat))
-                        {
-                            ReplySystem(Moderator, LanguageEn ? "The player already has a chat lock" : "Игрок уже имеет блокировку чата");
-                            return;
-                        }
-
-                        Info.MuteInfo.SetMute(MuteType.Chat, TimeMute);
-                        ReplySystem(Moderator, LanguageEn ? "Chat blocking issued to offline player" : "Блокировка чата выдана offline-игроку");
-                        return;
-                    }
-                    else
-                    {
-                        ReplySystem(Moderator, LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                        return;
-                    }
-                }
-                else
-                {
-                    ReplySystem(Moderator, LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                    return;
-                }
-            }
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            MutePlayer(target, MuteType.Chat, 0, Moderator, Reason, TimeMute, false, true);
-        }
-        private ListHashSet<BasePlayer> GetPlayerList(BasePlayer player, Chat.ChatChannel channel)
-        {
-            ListHashSet<BasePlayer> playerList = new();
-
-            if (channel is Chat.ChatChannel.Global or Chat.ChatChannel.Local)
-                playerList = BasePlayer.activePlayerList;
-            else if (channel == Chat.ChatChannel.Team)
-            {
-                RelationshipManager.PlayerTeam Team = RelationshipManager.ServerInstance.FindTeam(player.currentTeam);
-                if (Team == null) return null;
-                foreach (UInt64 FindPlayers in Team.members)
-                {
-                    BasePlayer TeamPlayer = BasePlayer.FindByID(FindPlayers);
-                    if (TeamPlayer == null) continue;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                    playerList.Add(TeamPlayer);
-                }
-            }
-            else if (channel == Chat.ChatChannel.Cards)
-            {
-                if (!player.isMounted)
-                    return null;
-
-                CardTable cardTable = player.GetMountedVehicle() as CardTable;
-                if (cardTable == null || !cardTable.GameController.PlayerIsInGame(player))
-                    return null;
-
-                List<Network.Connection> PlayersCards = new List<Network.Connection>();
-                cardTable.GameController.GetConnectionsInGame(PlayersCards);
-                if (PlayersCards == null || PlayersCards.Count == 0)
-                    return null;
-
-                foreach (Network.Connection PCard in PlayersCards)
-                {
-                    BasePlayer PlayerInRound = BasePlayer.FindByID(PCard.userid);
-                    if (PlayerInRound == null) return null;
-                    playerList.Add(PlayerInRound);
-                }
-            }
-
-            return playerList;
-        }
-
-        protected override void LoadDefaultConfig() => config = Configuration.GetNewConfiguration();
-        Int32 API_GET_DEFAULT_SIZE_MESSAGE() => config.ControllerMessages.GeneralSetting.OtherSetting.SizeMessage;
-        private void DrawUI_IQChat_Context_AdminAndModeration(BasePlayer player)
-        {
-            if (!permission.UserHasPermission(player.UserIDString, PermissionMute)) return;
-
-            String InterfaceModeration = InterfaceBuilder.GetInterface("UI_Chat_Moderation");
-            if (InterfaceModeration == null) return;
-
-            InterfaceModeration = InterfaceModeration.Replace("%TITLE%", GetLang("IQCHAT_TITLE_MODERATION_PANEL", player.UserIDString));
-            InterfaceModeration = InterfaceModeration.Replace("%COMMAND_MUTE_MENU%", $"newui.cmd action.mute.ignore open {SelectedAction.Mute}");
-            InterfaceModeration = InterfaceModeration.Replace("%TEXT_MUTE_MENU%", GetLang("IQCHAT_BUTTON_MODERATION_MUTE_MENU", player.UserIDString));
-
-            CuiHelper.AddUi(player, InterfaceModeration);
-
-            DrawUI_IQChat_Update_MuteChat_All(player);
-            DrawUI_IQChat_Update_MuteVoice_All(player);
-        }
-
-        private void AlertDisconnected(BasePlayer player, String reason)
-        {
-            Object status = Interface.CallHook("OnChatAlertDisconnected", player, reason);
-            if (status != null)
+                ReplySystem(Chat.ChatChannel.Global, Moderator, "Такого игрока нет на сервере");
                 return;
-            
-            Configuration.ControllerAlert.AdminSession AlertSessionAdmin = config.ControllerAlertSetting.AdminSessionSetting;
-            Configuration.ControllerAlert.PlayerSession AlertSessionPlayer = config.ControllerAlertSetting.PlayerSessionSetting;
-            GeneralInformation.RenameInfo RenameInformation = GeneralInfo.GetInfoRename(player.userID);
-
-            if (AlertSessionPlayer.DisconnectedAlert)
-            {
-                if (!AlertSessionAdmin.DisconnectedAlertAdmin)
-                    if (player.IsAdmin) return;
-
-                String DisplayName = player.displayName;
-
-                UInt64 UserID = player.userID;
-                if (RenameInformation != null)
-                {
-                    DisplayName = RenameInformation.RenameNick;
-                    UserID = RenameInformation.RenameID;
-                }
-
-                String Avatar = AlertSessionPlayer.ConnectedAvatarUse ? UserID.ToString() : String.Empty;
-
-                if (!permission.UserHasPermission(player.UserIDString, PermissionHideDisconnection))
-                {
-                    if (AlertSessionPlayer.DisconnectedAlertRandom)
-                        ReplyBroadcast(null, Avatar, false, AlertSessionPlayer.RandomDisconnectedAlert.LanguageMessages,DisplayName, reason);
-                    else
-                    {
-                        System.Object[] args = AlertSessionPlayer.DisconnectedReason ? new System.Object[] { DisplayName, reason } : new System.Object[] { DisplayName };
-                        String Lang = AlertSessionPlayer.DisconnectedReason ? "LEAVE_PLAYER_REASON" : "LEAVE_PLAYER";
-                        ReplyBroadcast(null, Avatar, false, Lang, args);
-                    }
-                }
-
-                Log($"[{player.userID}] {(AlertSessionPlayer.DisconnectedReason ? GetLang("LEAVE_PLAYER_REASON", player.UserIDString, DisplayName, reason) : GetLang("LEAVE_PLAYER", player.UserIDString, DisplayName))}");
             }
+
+            MutePlayer(target, MuteType.Chat, 0, Moderator, Reason, TimeMute, true, true);
         }
-        void OnUserPermissionRevoked(string id, string permName) => RemoveParametres(id, permName);
+
+        [ConsoleCommand("hunmute")]
+        void HideUnMuteConsole(ConsoleSystem.Arg arg)
+        {
+            if (arg.Player() != null)
+                if (!permission.UserHasPermission(arg.Player().UserIDString, PermMuteMenu)) return;
+            if (arg == null || arg.Args == null || arg.Args.Length != 1 || arg.Args.Length > 1)
+            {
+                PrintWarning("Неверный синтаксис,используйте : hunmute Steam64ID");
+                return;
+            }
+            string NameOrID = arg.Args[0];
+            BasePlayer target = BasePlayer.Find(NameOrID);
+            if (target == null)
+            {
+                PrintWarning("Такого игрока нет на сервере");
+                return;
+            }
+
+            UnmutePlayer(target, MuteType.Chat, arg.Player(), true, true);
+        }
 
         [ChatCommand("hunmute")]
         void HideUnMute(BasePlayer Moderator, string cmd, string[] arg)
         {
-            if (!permission.UserHasPermission(Moderator.UserIDString, PermissionMute)) return;
+            if (!permission.UserHasPermission(Moderator.UserIDString, PermMuteMenu)) return;
             if (arg == null || arg.Length != 1 || arg.Length > 1)
             {
-                ReplySystem(Moderator, LanguageEn ? "Invalid syntax, please use : hunmute Steam64ID/Nick" : "Неверный синтаксис,используйте : hunmute Steam64ID/Ник");
+                ReplySystem(Chat.ChatChannel.Global, Moderator, "Неверный синтаксис,используйте : hunmute Steam64ID/Ник");
                 return;
             }
             string NameOrID = arg[0];
-            BasePlayer target = GetPlayerNickOrID(NameOrID);
+            BasePlayer target = BasePlayer.Find(NameOrID);
             if (target == null)
             {
-                UInt64 Steam64ID = 0;
-                if (UInt64.TryParse(NameOrID, out Steam64ID))
-                {
-                    if (UserInformation.ContainsKey(Steam64ID))
-                    {
-                        User Info = UserInformation[Steam64ID];
-                        if (Info == null) return;
-                        if (!Info.MuteInfo.IsMute(MuteType.Chat))
-                        {
-                            ReplySystem(Moderator, LanguageEn ? "The player does not have a chat lock" : "У игрока нет блокировки чата");
-                            return;
-                        }
-
-                        if (!Moderator.IsAdmin && Moderator.userID == Steam64ID)
-                        {
-                            ReplySystem(Moderator, GetLang("FUNC_MESSAGE_UNMUTE_YOURSELF", Moderator.UserIDString));
-                            return;
-                        }
-                        
-                        Info.MuteInfo.UnMute(MuteType.Chat);
-                        ReplySystem(Moderator, LanguageEn ? "You have unblocked the offline chat to the player" : "Вы разблокировали чат offline игроку");
-                        return;
-                    }
-                    else
-                    {
-                        ReplySystem(Moderator, LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                        return;
-                    }
-                }
-                else
-                {
-                    ReplySystem(Moderator, LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
-                    return;
-                }
+                ReplySystem(Chat.ChatChannel.Global, Moderator, "Такого игрока нет на сервере");
+                return;
             }
 
             UnmutePlayer(target, MuteType.Chat, Moderator, true, true);
         }
 
-        public class GeneralInformation
-        {
-            public Boolean TurnMuteAllChat;
-            public Boolean TurnMuteAllVoice;
+        #endregion
 
-            public Dictionary<UInt64, RenameInfo> RenameList = new Dictionary<UInt64, RenameInfo>();
-            internal class RenameInfo
-            {
-                public String RenameNick;
-                public UInt64 RenameID;
-            }
-            
-            public RenameInfo GetInfoRename(UInt64 UserID)
-            {
-                if (!RenameList.ContainsKey(UserID)) return null;
-                return RenameList[UserID];
-            }
-        }
-        private Dictionary<BasePlayer, InformationOpenedUI> LocalBase = new Dictionary<BasePlayer, InformationOpenedUI>();
-        
-                private void DrawUI_IQChat_Mute_Alert(BasePlayer player, BasePlayer Target, UInt64 IDFake = 0)
-        {
-            String InterfacePanel = InterfaceBuilder.GetInterface("UI_Chat_Mute_And_Ignore_Alert_Panel");
-            String Interface = InterfaceBuilder.GetInterface("UI_Chat_Mute_Alert");
-            if (Interface == null || InterfacePanel == null) return;
+        #region Mute
 
-            Boolean isFake = (IsReadyIQFakeActive() && Target == null && IDFake != 0);
-            User InfoTarget = isFake ? null : UserInformation[Target.userID];
-            FakePlayer fakePlayer = GetCombinedPlayerList() == null ? null : GetCombinedPlayerList().FirstOrDefault(x => x.userId == IDFake.ToString());
-            if (isFake && fakePlayer == null)
-                return;
-            
-            Interface = Interface.Replace("%TITLE%", GetLang("IQCHAT_BUTTON_MODERATION_MUTE_MENU_TITLE_ALERT", player.UserIDString));
-            Interface = Interface.Replace("%BUTTON_TAKE_CHAT_ACTION%", (isFake && fakePlayer is { isMuted: false }) ? GetLang("IQCHAT_BUTTON_MODERATION_MUTE_MENU_TITLE_ALERT_CHAT", player.UserIDString) : (isFake && fakePlayer is { isMuted: true }) ? GetLang("IQCHAT_BUTTON_MODERATION_UNMUTE_MENU_TITLE_ALERT_CHAT", player.UserIDString) : InfoTarget == null ? GetLang("IQCHAT_BUTTON_MODERATION_MUTE_MENU_TITLE_ALERT_CHAT", player.UserIDString) : InfoTarget.MuteInfo.IsMute(MuteType.Chat) ? GetLang("IQCHAT_BUTTON_MODERATION_UNMUTE_MENU_TITLE_ALERT_CHAT", player.UserIDString) : GetLang("IQCHAT_BUTTON_MODERATION_MUTE_MENU_TITLE_ALERT_CHAT", player.UserIDString));
-            Interface = Interface.Replace("%BUTTON_TAKE_VOICE_ACTION%", (isFake && fakePlayer is { isMuted: false }) ? GetLang("IQCHAT_BUTTON_MODERATION_MUTE_MENU_TITLE_ALERT_VOICE", player.UserIDString) : (isFake && fakePlayer is { isMuted: true }) ? GetLang("IQCHAT_BUTTON_MODERATION_UNMUTE_MENU_TITLE_ALERT_VOICE", player.UserIDString) : InfoTarget == null ? GetLang("IQCHAT_BUTTON_MODERATION_MUTE_MENU_TITLE_ALERT_VOICE", player.UserIDString) : InfoTarget.MuteInfo.IsMute(MuteType.Voice) ? GetLang("IQCHAT_BUTTON_MODERATION_UNMUTE_MENU_TITLE_ALERT_VOICE", player.UserIDString) : GetLang("IQCHAT_BUTTON_MODERATION_MUTE_MENU_TITLE_ALERT_VOICE", player.UserIDString));
-            Interface = Interface.Replace("%COMMAND_TAKE_ACTION_MUTE_CHAT%", (isFake && fakePlayer is { isMuted: false }) ? $"newui.cmd action.mute.ignore ignore.and.mute.controller {SelectedAction.Mute} open.reason.mute {IDFake} {MuteType.Chat}" : (isFake && fakePlayer is { isMuted: true }) ? $"newui.cmd action.mute.ignore ignore.and.mute.controller {SelectedAction.Mute} unmute.yes {fakePlayer.userId} {MuteType.Chat}" : InfoTarget == null ? $"newui.cmd action.mute.ignore ignore.and.mute.controller {SelectedAction.Mute} open.reason.mute {IDFake} {MuteType.Chat}" : InfoTarget.MuteInfo.IsMute(MuteType.Chat) ? $"newui.cmd action.mute.ignore ignore.and.mute.controller {SelectedAction.Mute} unmute.yes {Target.UserIDString} {MuteType.Chat}" : $"newui.cmd action.mute.ignore ignore.and.mute.controller {SelectedAction.Mute} open.reason.mute {Target.UserIDString} {MuteType.Chat}");
-            Interface = Interface.Replace("%COMMAND_TAKE_ACTION_MUTE_VOICE%", (isFake && fakePlayer is { isMuted: false }) ? $"newui.cmd action.mute.ignore ignore.and.mute.controller {SelectedAction.Mute} open.reason.mute {IDFake} {MuteType.Voice}" : (isFake && fakePlayer is { isMuted: true }) ? $"newui.cmd action.mute.ignore ignore.and.mute.controller {SelectedAction.Mute} unmute.yes {fakePlayer.userId} {MuteType.Voice}" : InfoTarget == null ? $"newui.cmd action.mute.ignore ignore.and.mute.controller {SelectedAction.Mute} open.reason.mute {IDFake} {MuteType.Voice}" : InfoTarget.MuteInfo.IsMute(MuteType.Voice) ? $"newui.cmd action.mute.ignore ignore.and.mute.controller {SelectedAction.Mute} unmute.yes {Target.UserIDString} {MuteType.Voice}" : $"newui.cmd action.mute.ignore ignore.and.mute.controller {SelectedAction.Mute} open.reason.mute {Target.UserIDString} {MuteType.Voice}");
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            CuiHelper.DestroyUi(player, "MUTE_AND_IGNORE_PANEL_ALERT");
-            CuiHelper.AddUi(player, InterfacePanel);
-            CuiHelper.AddUi(player, Interface);
-        }
-        public class User
-        {
-            public Information Info = new Information();
-            public Setting Settings = new Setting();
-            public Mute MuteInfo = new Mute();
-            internal class Information
-            {
-                public String Prefix;
-                public String ColorNick;
-                public String ColorMessage;
-                public String Rank;
-                public String CustomColorNick;
-                public String CustomColorMessage;
-
-                public List<String> PrefixList = new List<String>();
-            }
-
-            internal class Setting
-            {
-                public Boolean TurnPM = true;
-                public Boolean TurnAlert = true;
-                public Boolean TurnBroadcast = true;
-                public Boolean TurnSound = true;
-
-                public List<UInt64> IgnoreUsers = new List<UInt64>();
-
-                public Boolean IsIgnored(UInt64 TargetID) => IgnoreUsers.Contains(TargetID);
-                public void IgnoredAddOrRemove(UInt64 TargetID)
-                {
-                    if (IsIgnored(TargetID))
-                        IgnoreUsers.Remove(TargetID);
-                    else IgnoreUsers.Add(TargetID);
-                }
-            }
-
-            internal class Mute
-            {
-                public Double TimeMuteChat;
-                public Double TimeMuteVoice;
-
-                public Double GetTime(MuteType Type)
-                {
-                    Double TimeMuted = 0;
-                    switch (Type)
-                    {
-                        case MuteType.Chat:
-                            TimeMuted = TimeMuteChat - CurrentTime;
-                            break;
-                        case MuteType.Voice:
-                            TimeMuted = TimeMuteVoice - CurrentTime;
-                            break;
-                        default:
-                            break;
-                    }
-                    return TimeMuted;
-                }
-                public void SetMute(MuteType Type, Int32 Time)
-                {
-                    switch (Type)
-                    {
-                        case MuteType.Chat:
-                            TimeMuteChat = Time + CurrentTime;
-                            break;
-                        case MuteType.Voice:
-                            TimeMuteVoice = Time + CurrentTime;
-                            break;
-                        default:
-                            break;
-                    }
-                }
-                public void UnMute(MuteType Type)
-                {
-                    switch (Type)
-                    {
-                        case MuteType.Chat:
-                            TimeMuteChat = 0;
-                            break;
-                        case MuteType.Voice:
-                            TimeMuteVoice = 0;
-                            break;
-                        default:
-                            break;
-                    }
-                }
-                public Boolean IsMute(MuteType Type) => GetTime(Type) > 0;
-            }
-        }
-
-        private void RenameUpdate(BasePlayer Renamer, String NewName)
-        {
-            Renamer.displayName = NewName;
-            Renamer.IPlayer?.Rename(NewName);
-        }
-
-        public Boolean IsReadyIQFakeActive()
-        {
-            if (IQFakeActive != null && config.ReferenceSetting.IQFakeActiveSettings.UseIQFakeActive)
-                return IQFakeActive.Call<Boolean>("IsReady");
-
-            return false;
-        }
-        
         [ConsoleCommand("mute")]
         void MuteCustomAdmin(ConsoleSystem.Arg arg)
         {
             if (arg.Player() != null)
-                if (!permission.UserHasPermission(arg.Player().UserIDString, PermissionMute)) return;
+                if (!permission.UserHasPermission(arg.Player().UserIDString, PermMuteMenu)) return;
             if (arg == null || arg.Args == null || arg.Args.Length != 3 || arg.Args.Length > 3)
             {
-                PrintWarning(LanguageEn ? "Invalid syntax, use : mute Steam64ID/Nick Reason Time(seconds)" : "Неверный синтаксис,используйте : mute Steam64ID/Ник Причина Время(секунды)");
+                PrintWarning("Неверный синтаксис,используйте : mute Steam64ID/Ник Причина Время(секунды)");
                 return;
             }
             string NameOrID = arg.Args[0];
             string Reason = arg.Args[1];
-            Int32 TimeMute = 0;
-            if (!Int32.TryParse(arg.Args[2], out TimeMute))
-            {
-                PrintWarning(LanguageEn ? "Enter time in numbers!" : "Введите время цифрами!");
-                return;
-            }
-            
-            BasePlayer target = GetPlayerNickOrID(NameOrID);
+            int TimeMute = int.Parse(arg.Args[2]);
+            BasePlayer target = BasePlayer.Find(NameOrID);
             if (target == null)
             {
-                UInt64 Steam64ID = 0;
-                if (UInt64.TryParse(NameOrID, out Steam64ID))
-                {
-                    if (UserInformation.ContainsKey(Steam64ID))
-                    {
-                        User Info = UserInformation[Steam64ID];
-                        if (Info == null) return;
-                        if (Info.MuteInfo.IsMute(MuteType.Chat))
-                        {
-                            PrintWarning(LanguageEn ? "The player already has a chat lock" : "Игрок уже имеет блокировку чата");
-                            return;
-                        }
+                PrintWarning("Такого игрока нет на сервере");
+                return;
+            }
 
-                        Info.MuteInfo.SetMute(MuteType.Chat, TimeMute);
-                        PrintWarning(LanguageEn ? "Chat blocking issued to offline player" : "Блокировка чата выдана offline-игроку");
-                        return;
-                    }
-                    else
+            MutePlayer(target, MuteType.Chat, 0, arg.Player(), Reason, TimeMute, true, true);
+            Puts("Успешно");
+        }
+
+        [ChatCommand("mute")]
+        void MuteCustomChat(BasePlayer Moderator, string cmd, string[] arg)
+        {
+            if (!permission.UserHasPermission(Moderator.UserIDString, PermMuteMenu)) return;
+            if (arg == null || arg.Length != 3 || arg.Length > 3)
+            {
+                ReplySystem(Chat.ChatChannel.Global, Moderator, "Неверный синтаксис,используйте : mute Steam64ID/Ник Причина Время(секунды)");
+                return;
+            }
+            string NameOrID = arg[0];
+            string Reason = arg[1];
+            int TimeMute = int.Parse(arg[2]);
+            BasePlayer target = BasePlayer.Find(NameOrID);
+            if (target == null)
+            {
+                ReplySystem(Chat.ChatChannel.Global, Moderator, "Такого игрока нет на сервере");
+                return;
+            }
+
+            MutePlayer(target, MuteType.Chat, 0, Moderator, Reason, TimeMute, true, true);
+        }
+
+        [ConsoleCommand("unmute")]
+        void UnMuteCustomAdmin(ConsoleSystem.Arg arg)
+        {
+            if (arg.Player() != null)
+                if (!permission.UserHasPermission(arg.Player().UserIDString, PermMuteMenu)) return;
+            if (arg == null || arg.Args == null || arg.Args.Length != 1 || arg.Args.Length > 1)
+            {
+                PrintWarning("Неверный синтаксис,используйте : unmute Steam64ID");
+                return;
+            }
+            string NameOrID = arg.Args[0];
+            BasePlayer target = BasePlayer.Find(NameOrID);
+            if (target == null)
+            {
+                PrintWarning("Такого игрока нет на сервере");
+                return;
+            }
+            UnmutePlayer(target, MuteType.Chat, arg.Player(), true, true);
+            Puts("Успешно");
+        }
+
+        [ChatCommand("unmute")]
+        void UnMuteCustomChat(BasePlayer Moderator, string cmd, string[] arg)
+        {
+            if (!permission.UserHasPermission(Moderator.UserIDString, PermMuteMenu)) return;
+            if (arg == null || arg.Length != 1 || arg.Length > 1)
+            {
+                ReplySystem(Chat.ChatChannel.Global, Moderator, "Неверный синтаксис,используйте : unmute Steam64ID");
+                return;
+            }
+            string NameOrID = arg[0];
+            BasePlayer target = BasePlayer.Find(NameOrID);
+            if (target == null)
+            {
+                ReplySystem(Chat.ChatChannel.Global, Moderator, "Такого игрока нет на сервере");
+                return;
+            }
+            UnmutePlayer(target, MuteType.Chat, Moderator, true, true);
+        }
+
+        #endregion
+
+        [ChatCommand("chat")]
+        void ChatCommandMenu(BasePlayer player)
+        {
+            if (IQModalMenu)
+                IQModalSend(player);
+            else IQChat_UI_Menu(player);
+        }
+
+        [ChatCommand("alert")]
+        void ChatAlertPlayers(BasePlayer player, string cmd, string[] arg) => Alert(player, arg,false);
+
+        [ChatCommand("alertui")]
+        void ChatAlertPlayersUI(BasePlayer player, string cmd, string[] arg) => AlertUI(player, arg);
+
+        [ChatCommand("adminalert")]
+        void ChatAdminAlert(BasePlayer player, string cmd, string[] arg) => Alert(player, arg, true);
+
+        [ChatCommand("rename")]
+        void RenameMetods(BasePlayer player, string cmd, string[] arg)
+        {
+            if (arg.Length == 0 || arg == null)
+            {
+                ReplySystem(Chat.ChatChannel.Global, player, lang.GetMessage("COMMAND_RENAME_NOTARG", this, player.UserIDString));
+                return;
+            }
+            string NewName = "";
+            foreach (var name in arg)
+                NewName += " " + name;
+            RenameFunc(player, NewName);
+        }
+
+        #region PM
+
+        [ChatCommand("pm")]
+        void PmChat(BasePlayer player, string cmd, string[] arg)
+        {
+            if (!config.MessageSetting.PMActivate) return;
+            if (arg.Length == 0 || arg == null)
+            {
+                ReplySystem(Chat.ChatChannel.Global, player, lang.GetMessage("COMMAND_PM_NOTARG", this, player.UserIDString));
+                return;
+            }
+            string NameUser = arg[0];
+            if (config.ReferenceSetting.IQFakeActiveSettings.UseIQFakeActive)
+                if (IQFakeActive)
+                    if (IsFake(NameUser))
                     {
-                        PrintWarning(LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
+                        ReplySystem(Chat.ChatChannel.Global, player, GetLang("COMMAND_PM_SUCCESS", player.UserIDString, string.Join(" ", arg.ToArray().ToArray()).Replace(NameUser, "")));
                         return;
                     }
-                }
-                else
+            BasePlayer TargetUser = BasePlayer.Find(NameUser);
+            if (TargetUser == null || NameUser == null)
+            {
+                ReplySystem(Chat.ChatChannel.Global, player, GetLang("COMMAND_PM_NOT_USER", player.UserIDString));
+                return;
+            }
+            if(!ChatSettingUser[TargetUser.userID].PMTurn)
+            {
+                ReplySystem(Chat.ChatChannel.Global, player, GetLang("FUNC_MESSAGE_PM_TURN_FALSE", player.UserIDString));
+                return;
+            }
+            if (config.MessageSetting.IgnoreUsePM)
+            {
+                if (IsIgnored(TargetUser.userID, player.userID))
                 {
-                    PrintWarning(LanguageEn ? "This player is not on the server" : "Такого игрока нет на сервере");
+                    ReplySystem(Chat.ChatChannel.Global, player, GetLang("IGNORE_NO_PM", player.UserIDString));
+                    return;
+                }
+                if (IsIgnored(player.userID,TargetUser.userID))
+                {
+                    ReplySystem(Chat.ChatChannel.Global, player, GetLang("IGNORE_NO_PM_ME", player.UserIDString));
                     return;
                 }
             }
+            var argList = arg.ToArray();
+            string Message = string.Join(" ", argList.ToArray()).Replace(NameUser, "");
+            if (Message.Length > 125) return;
+            if (Message.Length <= 0 || Message == null)
+            {
+                ReplySystem(Chat.ChatChannel.Global, player, GetLang("COMMAND_PM_NOT_NULL_MSG", player.UserIDString));
+                return;
+            }
 
-            MutePlayer(target, MuteType.Chat, 0, arg.Player(), Reason, TimeMute, false, true);
-            Puts(LanguageEn ? "Successfully" : "Успешно");
+            PMHistory[TargetUser] = player;
+            PMHistory[player] = TargetUser;
+            var DisplayNick = AdminSetting.RenameList.ContainsKey(player.userID) ? AdminSetting.RenameList[player.userID] : player.displayName;
+
+            if (IQModalMenu)
+            {
+                if (ChatSettingUser[TargetUser.userID].GlobalChatTurn)
+                    ReplySystem(Chat.ChatChannel.Global, TargetUser, GetLang("COMMAND_PM_SEND_MSG", player.UserIDString, DisplayNick, Message));
+            }
+            else ReplySystem(Chat.ChatChannel.Global, TargetUser, GetLang("COMMAND_PM_SEND_MSG", player.UserIDString, DisplayNick, Message));
+
+            ReplySystem(Chat.ChatChannel.Global, player, GetLang("COMMAND_PM_SUCCESS", player.UserIDString, Message));
+
+            if (ChatSettingUser[TargetUser.userID].SoundTurn || (IQModalMenu && ChatSettingUser[TargetUser.userID].GlobalChatTurn))
+                Effect.server.Run(config.MessageSetting.SoundPM, TargetUser.GetNetworkPosition());
+            Log($"ЛИЧНЫЕ СООБЩЕНИЯ : {player.userID}({DisplayNick}) отправил сообщение игроку - {TargetUser.displayName}\nСООБЩЕНИЕ : {Message}");
+
+            RCon.Broadcast(RCon.LogType.Chat, new Chat.ChatEntry
+            {
+                Message = $"ЛИЧНЫЕ СООБЩЕНИЯ : {DisplayNick}({player.userID}) -> {TargetUser.displayName} : СООБЩЕНИЕ : {Message}",
+                UserId = player.UserIDString,
+                Username = player.displayName,
+                Channel = Chat.ChatChannel.Global,
+                Time = (DateTime.UtcNow.Hour * 3600) + (DateTime.UtcNow.Minute * 60),
+                Color = "#3f4bb8",
+            });
+            PrintWarning($"ЛИЧНЫЕ СООБЩЕНИЯ : {DisplayNick}({player.userID}) -> {TargetUser.displayName} : СООБЩЕНИЕ : {Message}");
         }
-        private class InformationOpenedUI
+
+        [ChatCommand("r")]
+        void RChat(BasePlayer player, string cmd, string[] arg)
         {
-            public List<Configuration.ControllerParameters.AdvancedFuncion> ElementsPrefix;
-            public List<Configuration.ControllerParameters.AdvancedFuncion> ElementsNick;
-            public List<Configuration.ControllerParameters.AdvancedFuncion> ElementsChat;
-            public List<Configuration.ControllerParameters.AdvancedFuncion> ElementsRanks;
-            public Int32 SlideIndexPrefix = 0;
-            public Int32 SlideIndexNick = 0;
-            public Int32 SlideIndexChat = 0;
-            public Int32 SlideIndexRank = 0;
-        }
-        
-        
-        
-        String IQRankGetRank(BasePlayer.EncryptedValue<UInt64> userID) => IQRankGetRank(userID.Get());
-
-
-        
-        
-                
-        
-        private class ImageUI
-        {
-            private const String _path = "IQSystem/IQChat/Images/";
-            private const String _printPath = "data/" + _path;
-            private readonly Dictionary<String, ImageData> _images = new()
+            if (!config.MessageSetting.PMActivate) return;
+            if (arg.Length == 0 || arg == null)
             {
-                { "UI_IQCHAT_CONTEXT_NO_RANK", new ImageData() },
-                { "UI_IQCHAT_CONTEXT_RANK", new ImageData() },
-                { "IQCHAT_INFORMATION_ICON", new ImageData() },
-                { "IQCHAT_SETTING_ICON", new ImageData() },
-                { "IQCHAT_IGNORE_INFO_ICON", new ImageData() },
-                { "IQCHAT_MODERATION_ICON", new ImageData() },
-                { "IQCHAT_ELEMENT_PANEL_ICON", new ImageData() },
-                { "IQCHAT_ELEMENT_PREFIX_MULTI_TAKE_ICON", new ImageData() },
-                { "IQCHAT_ELEMENT_SLIDER_ICON", new ImageData() },
-                { "IQCHAT_ELEMENT_SLIDER_LEFT_ICON", new ImageData() },
-                { "IQCHAT_ELEMENT_SLIDER_RIGHT_ICON", new ImageData() },
-                { "IQCHAT_ELEMENT_DROP_LIST_OPEN_ICON", new ImageData() },
-                { "IQCHAT_ELEMENT_DROP_LIST_OPEN_ARGUMENT_ICON", new ImageData() },
-                { "IQCHAT_ELEMENT_DROP_LIST_OPEN_TAKED", new ImageData() },
-                { "IQCHAT_ELEMENT_SETTING_CHECK_BOX", new ImageData() },
-                { "IQCHAT_ALERT_PANEL", new ImageData() },
-                { "IQCHAT_MUTE_AND_IGNORE_PANEL", new ImageData() },
-                { "IQCHAT_MUTE_AND_IGNORE_ICON", new ImageData() },
-                { "IQCHAT_MUTE_AND_IGNORE_SEARCH", new ImageData() },
-                { "IQCHAT_MUTE_AND_IGNORE_PAGE_PANEL", new ImageData() },
-                { "IQCHAT_MUTE_AND_IGNORE_PLAYER", new ImageData() },
-                { "IQCHAT_MUTE_AND_IGNORE_PLAYER_STATUS", new ImageData() },
-                { "IQCHAT_IGNORE_ALERT_PANEL", new ImageData() },
-                { "IQCHAT_IGNORE_ALERT_ICON", new ImageData() },
-                { "IQCHAT_IGNORE_ALERT_BUTTON_YES", new ImageData() },
-                { "IQCHAT_IGNORE_ALERT_BUTTON_NO", new ImageData() },
-                { "IQCHAT_MUTE_ALERT_PANEL", new ImageData() },
-                { "IQCHAT_MUTE_ALERT_ICON", new ImageData() },
-                { "IQCHAT_MUTE_ALERT_PANEL_REASON", new ImageData() },
-              
-            };
-
-            private enum ImageStatus
-            {
-                NotLoaded,
-                Loaded,
-                Failed
+                ReplySystem(Chat.ChatChannel.Global, player, GetLang("COMMAND_R_NOTARG", player.UserIDString));
+                return;
             }
-
-            private class ImageData
+            if (!PMHistory.ContainsKey(player))
             {
-                public ImageStatus Status = ImageStatus.NotLoaded;
-                public string Id { get; set; }
+                ReplySystem(Chat.ChatChannel.Global, player, GetLang("COMMAND_R_NOTMSG", player.UserIDString));
+                return;
             }
-
-            public string GetImage(string name)
+            BasePlayer RetargetUser = PMHistory[player];
+            if (RetargetUser == null)
             {
-                ImageData image;
-                if (_images.TryGetValue(name, out image) && image.Status == ImageStatus.Loaded)
-                    return image.Id;
-                return null;
+                ReplySystem(Chat.ChatChannel.Global, player, GetLang("COMMAND_PM_NOT_USER", player.UserIDString));
+                return;
             }
-
-            public void DownloadImage()
+            if (!ChatSettingUser[RetargetUser.userID].PMTurn)
             {
-                KeyValuePair<string, ImageData>? image = null;
-                foreach (KeyValuePair<string, ImageData> img in _images)
+                ReplySystem(Chat.ChatChannel.Global, player, GetLang("FUNC_MESSAGE_PM_TURN_FALSE", player.UserIDString));
+                return;
+            }
+            if (config.MessageSetting.IgnoreUsePM)
+            {
+                if (IsIgnored(RetargetUser.userID, player.userID))
                 {
-                    if (img.Value.Status == ImageStatus.NotLoaded)
+                    ReplySystem(Chat.ChatChannel.Global, player, GetLang("IGNORE_NO_PM", player.UserIDString));
+                    return;
+                }
+                if (IsIgnored(player.userID, RetargetUser.userID))
+                {
+                    ReplySystem(Chat.ChatChannel.Global, player, GetLang("IGNORE_NO_PM_ME", player.UserIDString));
+                    return;
+                }
+            }
+            string Message = string.Join(" ", arg.ToArray());
+            if (Message.Length > 125) return;
+            if (Message.Length <= 0 || Message == null)
+            {
+                ReplySystem(Chat.ChatChannel.Global, player, GetLang("COMMAND_PM_NOT_NULL_MSG", player.UserIDString));
+                return;
+            }
+            PMHistory[RetargetUser] = player;
+            var DisplayNick = AdminSetting.RenameList.ContainsKey(player.userID) ? AdminSetting.RenameList[player.userID] : player.displayName;
+
+            if (IQModalMenu)
+            {
+                if (ChatSettingUser[RetargetUser.userID].GlobalChatTurn)
+                    ReplySystem(Chat.ChatChannel.Global, RetargetUser, GetLang("COMMAND_PM_SEND_MSG", player.UserIDString, DisplayNick, Message));
+            }
+            else ReplySystem(Chat.ChatChannel.Global, RetargetUser, GetLang("COMMAND_PM_SEND_MSG", player.UserIDString, DisplayNick, Message));
+
+            ReplySystem(Chat.ChatChannel.Global, player, GetLang("COMMAND_PM_SUCCESS", player.UserIDString, Message));
+
+            if (ChatSettingUser[RetargetUser.userID].SoundTurn || (ChatSettingUser[RetargetUser.userID].GlobalChatTurn && IQModalMenu))
+                Effect.server.Run(config.MessageSetting.SoundPM, RetargetUser.GetNetworkPosition());
+
+            Log($"ЛИЧНЫЕ СООБЩЕНИЯ : {player.displayName} отправил сообщение игроку - {RetargetUser.displayName}\nСООБЩЕНИЕ : {Message}");
+
+            RCon.Broadcast(RCon.LogType.Chat, new Chat.ChatEntry
+            {
+                Message = $"ЛИЧНЫЕ СООБЩЕНИЯ : {DisplayNick}({player.userID}) -> {RetargetUser.displayName} : СООБЩЕНИЕ : {Message}",
+                UserId = player.UserIDString,
+                Username = player.displayName,
+                Channel = Chat.ChatChannel.Global,
+                Time = (DateTime.UtcNow.Hour * 3600) + (DateTime.UtcNow.Minute * 60),
+                Color = "#3f4bb8",
+            });
+            PrintWarning($"ЛИЧНЫЕ СООБЩЕНИЯ : {DisplayNick}({player.userID}) -> {RetargetUser.displayName} : СООБЩЕНИЕ : {Message}");
+        }
+
+        [ChatCommand("ignore")]
+        void IgnorePlayerPM(BasePlayer player, string cmd, string[] arg)
+        {
+            if (!config.MessageSetting.IgnoreUsePM) return;
+            var ChatUser = ChatSettingUser[player.userID];
+            if (arg.Length == 0 || arg == null)
+            {
+                ReplySystem(Chat.ChatChannel.Global, player, lang.GetMessage("INGORE_NOTARG", this, player.UserIDString));
+                return;
+            }
+            string NameUser = arg[0];
+            BasePlayer TargetUser = BasePlayer.Find(NameUser);
+            if (TargetUser == null || NameUser == null)
+            {
+                ReplySystem(Chat.ChatChannel.Global, player, lang.GetMessage("COMMAND_PM_NOT_USER", this, player.UserIDString));
+                return;
+            }
+
+            string Lang = !IsIgnored(player.userID, TargetUser.userID) ? GetLang("IGNORE_ON_PLAYER", player.UserIDString, TargetUser.displayName) : GetLang("IGNORE_OFF_PLAYER", player.UserIDString, TargetUser.displayName);
+            ReplySystem(Chat.ChatChannel.Global, player, Lang);
+            if (!IsIgnored(player.userID, TargetUser.userID))
+                ChatUser.IgnoredUsers.Add(TargetUser.userID);
+            else ChatUser.IgnoredUsers.Remove(TargetUser.userID);
+        }
+
+        #endregion
+
+        [ConsoleCommand("alert")]
+        void ChatAlertPlayersCMD(ConsoleSystem.Arg arg) => Alert(arg.Player(), arg.Args, false);
+
+        [ConsoleCommand("alertui")]
+        void ChatAlertPlayersUICMD(ConsoleSystem.Arg arg) => AlertUI(arg.Player(), arg.Args);
+
+        [ConsoleCommand("adminalert")]
+        void ConsoleAdminAlert(ConsoleSystem.Arg arg) => Alert(arg.Player(), arg.Args, true);
+
+        [ConsoleCommand("alertuip")]
+        void CmodAlertOnlyUser(ConsoleSystem.Arg arg)
+        {
+            if (arg.Args == null || arg.Args.Length < 2)
+            {
+                PrintWarning("Используйте правильно ситаксис : alertuip Steam64ID Сообщение");
+                return;
+            }
+            var argList = arg.Args.ToArray();
+            string Message = string.Join(" ", argList.ToArray().Skip(1));
+            if (Message.Length > 125) return;
+            if (Message.Length <= 0 || Message == null)
+            {
+                PrintWarning("Вы не указали сообщение игроку");
+                return;
+            }
+            BasePlayer player = BasePlayer.Find(arg.Args[0]);
+            if (player == null)
+            {
+                PrintWarning("Игрока нет в сети");
+                return;
+            }
+            UIAlert(player, Message);
+        }
+
+        [ConsoleCommand("saybro")]
+        void ChatAlertPlayerInPM(ConsoleSystem.Arg arg)
+        {
+            if (arg.Args == null || arg.Args.Length < 2)
+            {
+                PrintWarning("Используйте правильно ситаксис : saybro NameOrID Сообщение");
+                return;
+            }
+            var argList = arg.Args.ToArray();
+            string Message = string.Join(" ", argList.ToArray());
+            if (Message.Length > 125) return;
+            if (Message.Length <= 0 || Message == null)
+            {
+                PrintWarning("Вы не указали сообщение игроку");
+                return;
+            }
+            BasePlayer player = BasePlayer.Find(arg.Args[0]);
+            if(player == null)
+            {
+                PrintWarning("Игрока нет в сети");
+                return;
+            }
+            ReplySystem(Chat.ChatChannel.Global, player, Message.Replace(player.userID.ToString(), ""));
+        }
+
+        [ConsoleCommand("set")]
+        private void ConsolesCommandPrefixSet(ConsoleSystem.Arg arg)
+        {
+            if (arg.Args == null || arg.Args.Length != 3)
+            {
+                PrintWarning("Используйте правильно ситаксис : set [Steam64ID] [prefix/chat/nick/custom] [Argument]");
+                return;
+            }
+            ulong Steam64ID = 0;
+            BasePlayer player = null;
+            if (ulong.TryParse(arg.Args[0], out Steam64ID))
+                player = BasePlayer.FindByID(Steam64ID);
+            if (player == null)
+            {
+                PrintWarning("Неверно указан SteamID игрока или ошибка в синтаксисе\nИспользуйте правильно ситаксис : set [Steam64ID] [prefix/chat/nick/custom] [Argument]");
+                return;
+            }
+            var DataPlayer = ChatSettingUser[player.userID];
+
+            switch (arg.Args[1].ToLower())
+            {
+                case "prefix":
                     {
-                        image = img;
+                        string KeyPrefix = arg.Args[2];
+                        foreach (var Prefix in config.PrefixList.Where(x => x.Permissions == KeyPrefix))
+                            if (config.PrefixList.Contains(Prefix))
+                            {
+                                DataPlayer.ChatPrefix = Prefix.Argument;
+                                Puts($"Префикс успешно установлен на - {Prefix.Argument}");
+                            }
+                            else Puts("Неверно указан Permissions от префикса");
                         break;
                     }
-                }
-
-                if (image != null)
-                {
-                    ServerMgr.Instance.StartCoroutine(ProcessDownloadImage(image.Value));
-                }
-                else
-                {
-                    List<String> failedImages = new List<string>();
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                    foreach (KeyValuePair<String, ImageData> img in _images)
+                case "chat":
                     {
-                        if (img.Value.Status == ImageStatus.Failed)
+                        string KeyChatColor = arg.Args[2];
+                        foreach (var ColorChat in config.PrefixList.Where(x => x.Permissions == KeyChatColor))
+                            if (config.MessageColorList.Contains(ColorChat))
+                            {
+                                DataPlayer.MessageColor = ColorChat.Argument;
+                                Puts($"Цвет сообщения успешно установлен на - {ColorChat.Argument}");
+                            }
+                            else Puts("Неверно указан Permissions от префикса");
+                        break;
+                    }
+                case "nick":
+                    {
+                        string KeyNickColor = arg.Args[2];
+                        foreach (var ColorChat in config.NickColorList.Where(x => x.Permissions == KeyNickColor))
+                            if (config.NickColorList.Contains(ColorChat))
+                            {
+                                DataPlayer.NickColor = ColorChat.Argument;
+                                Puts($"Цвет ника успешно установлен на - {ColorChat.Argument}");
+                            }
+                            else Puts("Неверно указан Permissions от префикса");
+                        break;
+                    }
+                case "custom":
+                    {
+                        string CustomPrefix = arg.Args[2];
+                        DataPlayer.ChatPrefix = CustomPrefix;
+                        Puts($"Кастомный префикс успешно установлен на - {CustomPrefix}");
+                        break;
+                    }
+                default:
+                    {
+                        PrintWarning("Используйте правильно ситаксис : set [Steam64ID] [prefix/chat/nick/custom] [Argument]");
+                        break;
+                    }
+            }
+
+        }
+
+        #endregion
+
+        #region FuncCommand
+
+        [ConsoleCommand("iq.chat")]
+        private void ConsoleCommandChat(ConsoleSystem.Arg arg)
+        {
+            BasePlayer player = arg.Player();
+            if (player == null) return;
+            var DataPlayer = ChatSettingUser[player.userID];
+
+            switch (arg.Args[0])
+            {
+                case "take.element.droplist": 
+                    {
+                        bool IsOpened = bool.Parse(arg.Args[1]);
+                        TakeElemntUser Type = (TakeElemntUser)Enum.Parse(typeof(TakeElemntUser), arg.Args[2]);
+                        Take_DropList(player, IsOpened, Type);
+                        break;
+                    }
+                case "drop.list.page.controller": 
+                    {
+                        string PageAction = (string)arg.Args[1];
+                        TakeElemntUser Type = (TakeElemntUser)Enum.Parse(typeof(TakeElemntUser), arg.Args[2]);
+
+                        switch (PageAction)
                         {
-                            failedImages.Add(img.Key);
+                            case "next":
+                                {
+                                    int Page = int.Parse(arg.Args[3]) + 1;
+                                    LoadedElementList(player, Type, Page);
+                                    break;
+                                }
+                            case "back":
+                                {
+                                    int Page = int.Parse(arg.Args[3]) - 1;
+                                    LoadedElementList(player, Type, Page);
+                                    break;
+                                }
                         }
+                        break;
                     }
-
-                    if (failedImages.Count > 0)
+                case "take.element.user": 
                     {
-                        String images = String.Join(", ", failedImages);
-                        _.PrintError(LanguageEn
-                            ? $"Failed to load the following images: {images}. Perhaps you did not upload them to the '{_printPath}' folder.\nDownloaded image - https://drive.google.com/drive/folders/1duFZ6jOjGGwY4Rni-GFD0doviOQiOKMi?usp=sharing"
-                            : $"Не удалось загрузить следующие изображения: {images}. Возможно, вы не загрузили их в папку '{_printPath}'.\nСкачать можно тут - https://drive.google.com/drive/folders/1duFZ6jOjGGwY4Rni-GFD0doviOQiOKMi?usp=sharing");
-                        Interface.Oxide.UnloadPlugin(_.Name);
+                        TakeElemntUser TypeElement = (TakeElemntUser)Enum.Parse(typeof(TakeElemntUser), arg.Args[1]);
+                        switch(TypeElement)
+                        {
+                            case TakeElemntUser.Prefix:
+                                {
+                                    var Other = config.InterfaceChat.OtherSettingInterface;
+                                    int Index = int.Parse(arg.Args[2]);
+                                    int Page =  int.Parse(arg.Args[3]);
+                                    var PrefixList = Other.DropListPrefixUse ? config.PrefixList.Where(p => permission.UserHasPermission(player.UserIDString, p.Permissions)).Skip(8 * Page).ToList(): config.PrefixList.Where(p => permission.UserHasPermission(player.UserIDString, p.Permissions)).ToList();
+                                    DataPlayer.ChatPrefix = PrefixList[Index].Argument;
+                                    UI_Prefix_Taked(player, Index, Page);
+                                    break;
+                                }
+                            case TakeElemntUser.Nick:
+                                {
+                                    var Other = config.InterfaceChat.OtherSettingInterface;
+                                    int Index = int.Parse(arg.Args[2]);
+                                    int Page = int.Parse(arg.Args[3]);
+                                    var ColorList = Other.DropListColorNickUse ? config.NickColorList.Where(p => permission.UserHasPermission(player.UserIDString, p.Permissions)).Skip(8 * Page).ToList() : config.NickColorList.Where(p => permission.UserHasPermission(player.UserIDString, p.Permissions)).ToList();
+                                    DataPlayer.NickColor = ColorList[Index].Argument;
+                                    UI_Nick_Taked(player, Index, Page);
+                                    break;
+                                }
+                            case TakeElemntUser.Chat:
+                                {
+                                    var Other = config.InterfaceChat.OtherSettingInterface;
+                                    int Index = int.Parse(arg.Args[2]);
+                                    int Page = int.Parse(arg.Args[3]);
+                                    var ColorList = Other.DropListColorChatUse ? config.MessageColorList.Where(p => permission.UserHasPermission(player.UserIDString, p.Permissions)).Skip(8 * Page).ToList() : config.MessageColorList.Where(p => permission.UserHasPermission(player.UserIDString, p.Permissions)).ToList();
+                                    DataPlayer.MessageColor = ColorList[Index].Argument;
+                                    UI_Chat_Taked(player, Index, Page);
+                                    break;
+                                }
+                            case TakeElemntUser.Rank:
+                                {
+                                    var Other = config.InterfaceChat.OtherSettingInterface;
+                                    int Index = int.Parse(arg.Args[2]);
+                                    int Page = int.Parse(arg.Args[3]);
+                                    var RankList = Other.DropListRankUse ? IQRankListKey(player.userID).Skip(8 * Page).ToList() : IQRankListKey(player.userID);
+                                    IQRankSetRank(player.userID, RankList[Index]);
+                                    UI_Rank_Taked(player, Index, Page);
+                                    break;
+                                }
+                            case TakeElemntUser.MultiPrefix: 
+                                {
+                                    var Other = config.InterfaceChat.OtherSettingInterface;
+                                    int Index = int.Parse(arg.Args[2]);
+                                    int Page = int.Parse(arg.Args[3]);
+                                    var PrefixList = config.PrefixList.Where(p => permission.UserHasPermission(player.UserIDString, p.Permissions)).Skip(8 * Page).ToList();
+                                    string Prefix = PrefixList[Index].Argument;
+
+                                    if (DataPlayer.MultiPrefix.Contains(Prefix))
+                                        DataPlayer.MultiPrefix.Remove(Prefix);
+                                    else DataPlayer.MultiPrefix.Add(Prefix);
+
+                                    Take_DropList(player, false, TypeElement, Page);
+                                    break;
+                                }
+                        }
+                        if (!IQModalMenu)
+                            UpdateNick(player);
+                        else UpdateNickModal(player);
+                        break;
                     }
-                    else
+                case "setting":
                     {
-                        _.Puts(LanguageEn
-                            ? $"{_images.Count} images downloaded successfully!"
-                            : $"{_images.Count} изображений успешно загружено!");
-                        
-                        _interface = new InterfaceBuilder();
+                        string Action = (string)arg.Args[1];
+                        switch (Action)
+                        {
+                            case "turned.pm":
+                                {
+                                    bool Turn = bool.Parse(arg.Args[2]);
+                                    ChatSettingUser[player.userID].PMTurn = Turn;
+                                    TurnedPM(player);
+                                    break;
+                                }
+                            case "turned.alert":
+                                {
+                                    bool Turn = bool.Parse(arg.Args[2]);
+                                    ChatSettingUser[player.userID].AlertTurn = Turn;
+                                    TurnedAlert(player);
+                                    break;
+                                }
+                            case "turned.broadcast":
+                                {
+                                    bool Turn = bool.Parse(arg.Args[2]);
+                                    ChatSettingUser[player.userID].BroadcastTurn = Turn;
+                                    TurnedBroadcast(player);
+                                    break;
+                                }
+                            case "turned.sound":
+                                {
+                                    bool Turn = bool.Parse(arg.Args[2]);
+                                    ChatSettingUser[player.userID].SoundTurn = Turn;
+                                    TurnedSound(player);
+                                    break;
+                                }         
+                            case "turned.globalchat":
+                                {
+                                    bool Turn = bool.Parse(arg.Args[2]);
+                                    ChatSettingUser[player.userID].GlobalChatTurn = Turn;
+                                    TurnedGlobalChat(player);
+                                    break;
+                                }
+                        }
+                        break;
                     }
-                }
+                case "ignore.controller":  
+                    {
+                        string Action = (string)arg.Args[1];
+                        switch (Action)
+                        {
+                            case "open":
+                                {
+                                    UI_Ignored_Menu(player);
+                                    break;
+                                }
+                            case "page.controller":
+                                {
+                                    string PageAction = (string)arg.Args[2];
+                                    switch (PageAction)
+                                    {
+                                        case "next":
+                                            {
+                                                int Page = int.Parse(arg.Args[3]) + 1;
+                                                UI_Ignored_Loaded_Players(player, Page);
+                                                break;
+                                            }
+                                        case "back":
+                                            {
+                                                int Page = int.Parse(arg.Args[3]) - 1;
+                                                UI_Ignored_Loaded_Players(player, Page);
+                                                break;
+                                            }
+                                    }
+                                    break;
+                                }
+                            case "search.player":
+                                {
+                                    string Search = arg.HasArgs(3) ? arg.Args[2] : "";
+                                    UI_Ignored_Loaded_Players(player, 0, Search);
+                                    break;
+                                }
+                            case "take.user": 
+                                {
+                                    string ActionUser = (string)arg.Args[2];
+                                    switch (ActionUser)
+                                    {
+                                        case "take":
+                                            {
+                                                ulong TargetUserID = ulong.Parse(arg.Args[3]);
+                                                Take_User_Ignored_Menu(player, TargetUserID);
+                                                break;
+                                            }
+                                        case "user.confirm":
+                                            {
+                                                BasePlayer Target = BasePlayer.FindByID(ulong.Parse(arg.Args[3]));
+                                                string ConfirmOut = (string)arg.Args[4];
+                                                switch (ConfirmOut)
+                                                {
+                                                    case "yes":
+                                                        {
+                                                            if (Target == null || !Target.IsConnected)
+                                                            {
+                                                                AlertController(player, "UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_CHAT_ACTION_NOT_CONNNECTED",false);
+                                                                return;
+                                                            }
+                                                            if (!IsIgnored(player.userID, Target.userID))
+                                                                DataPlayer.IgnoredUsers.Add(Target.userID);
+                                                            else DataPlayer.IgnoredUsers.Remove(Target.userID);
+                                                            AlertController(player, "UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_CHAT_ACTION_ACCESS",false);
+
+                                                            var Interface = config.InterfaceChat;
+                                                            float FadeIn = 0.3f;
+                                                            CuiElementContainer container = new CuiElementContainer();
+                                                            CuiHelper.DestroyUi(player, "TITLE_LABEL_INFORMATION_IGNORED_TITLE_COUNT");
+
+                                                            string AcnhorMin = IQModalMenu ? "0.2033799 0.5130037" : "0.443033 0.366909";
+                                                            string AnchorMax = IQModalMenu ? "0.3609195 0.553529" : "0.9584759 0.4173968";
+                                                            container.Add(new CuiButton
+                                                            {
+                                                                RectTransform = { AnchorMin = AcnhorMin, AnchorMax = AnchorMax },
+                                                                Button = { FadeIn = FadeIn, Command = "iq.chat ignore.controller open", Color = HexToRustFormat(Interface.HexButton) },
+                                                                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_INFORMATION_IGNORED_BUTTON_TITLE", player.UserIDString, DataPlayer.IgnoredUsers.Count), Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleCenter }
+                                                            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_INFORMATION_IGNORED_TITLE_COUNT");
+
+                                                            CuiHelper.AddUi(player, container);
+                                                            break;
+                                                        }
+                                                    case "no":
+                                                        {
+                                                            CuiHelper.DestroyUi(player, "IQ_IGNORED_BLUR_CONTENT");
+                                                            break;
+                                                        }
+                                                }
+                                                break;
+                                            }
+                                    }
+                                    break;
+                                }
+                        }
+                        break;
+                    }
+                case "mute.controller":
+                    {
+                        string Action = (string)arg.Args[1];
+                        switch (Action)
+                        {
+                            case "open.menu":
+                                {
+                                    IQChat_UI_Mute_Menu(player);
+                                    break;
+                                }
+                            case "mute.all.players": 
+                                {
+                                    MuteType TypeMute = (MuteType)Enum.Parse(typeof(MuteType), arg.Args[2]);
+
+                                    if (TypeMute == MuteType.Chat)
+                                    {
+                                        AdminSetting.MuteChatAll = true;
+                                        MuteAllChatPlayer();
+                                        ReplyBroadcast(GetLang("FUNC_MESSAGE_MUTE_ALL_CHAT", player.UserIDString));
+                                        TurnedAdminButtonMuteAllChat(player); 
+                                    }
+                                    else
+                                    {
+                                        AdminSetting.MuteVoiceAll = true;
+                                        MuteAllVoicePlayer();
+                                        ReplyBroadcast(GetLang("FUNC_MESSAGE_MUTE_ALL_VOICE", player.UserIDString));
+                                        TurnedAdminButtonMuteAllVoice(player);
+                                    }
+                                    break;
+                                }
+                            case "unmute.all.players":
+                                {
+                                    MuteType TypeMute = (MuteType)Enum.Parse(typeof(MuteType), arg.Args[2]);
+                                    if (TypeMute == MuteType.Chat)
+                                    {
+                                        AdminSetting.MuteChatAll = false;
+                                        UnMuteAllChatPlayer();
+                                        ReplyBroadcast(GetLang("FUNC_MESSAGE_UNMUTE_ALL_CHAT", player.UserIDString));
+                                        TurnedAdminButtonMuteAllChat(player);
+                                    }
+                                    else
+                                    {
+                                        AdminSetting.MuteVoiceAll = false;
+                                        UnMuteAllVoicePlayer();
+                                        ReplyBroadcast(GetLang("FUNC_MESSAGE_UNMUTE_ALL_VOICE", player.UserIDString));
+                                        TurnedAdminButtonMuteAllVoice(player);
+                                    }
+                                    break;
+                                }
+                            case "page.controller":
+                                {
+                                    string PageAction = (string)arg.Args[2];
+                                    switch (PageAction)
+                                    {
+                                        case "next":
+                                            {
+                                                int Page = int.Parse(arg.Args[3]) + 1;
+                                                Loaded_Players_Mute_Menu(player, Page);
+                                                break;
+                                            }
+                                        case "back":
+                                            {
+                                                int Page = int.Parse(arg.Args[3]) - 1;
+                                                Loaded_Players_Mute_Menu(player, Page);
+                                                break;
+                                            }
+                                    }
+                                    break;
+                                }
+                            case "search.player":
+                                {
+                                    string Search = arg.HasArgs(3) ? arg.Args[2] : "";
+                                    Loaded_Players_Mute_Menu(player, 0, Search);
+                                    break;
+                                }
+                            case "take.user": 
+                                { 
+                                    string ActionUser = (string)arg.Args[2];
+                                    switch(ActionUser)
+                                    {
+                                        case "take":
+                                            {
+                                                ulong TargetUserID = ulong.Parse(arg.Args[3]);
+                                                Take_User_Mute_Menu(player, TargetUserID);
+                                                break;
+                                            }
+                                        case "take.type":
+                                            {
+                                                MuteType TypeAction = (MuteType)Enum.Parse(typeof(MuteType), arg.Args[3]);
+                                                ulong TargetUserID = ulong.Parse(arg.Args[4]);
+                                                Take_Reason_Mute_Menu(player, TypeAction, TargetUserID);
+                                                break;
+                                            }
+                                        case "user.action": 
+                                            {
+                                                BasePlayer Target = BasePlayer.FindByID(ulong.Parse(arg.Args[3]));
+                                                string ActionMute = (string)arg.Args[4];
+                                                switch (ActionMute)
+                                                {
+                                                    case "mute":
+                                                        {
+                                                            MuteType TypeAction = (MuteType)Enum.Parse(typeof(MuteType), arg.Args[5]);
+                                                            int ReasonIndex = int.Parse(arg.Args[6]);
+                                                            MutePlayer(Target, TypeAction, ReasonIndex, player);
+                                                            break;
+                                                        }
+                                                    case "unmute":
+                                                        {
+                                                            MuteType TypeAction = (MuteType)Enum.Parse(typeof(MuteType), arg.Args[5]);
+                                                            UnmutePlayer(Target, TypeAction, player);
+                                                            break;
+                                                        }
+                                                }
+                                                break;
+                                            }
+                                    }
+                                    break;
+                                }
+                        }
+                        break;
+                    }
             }
-            
-            public void UnloadImages()
+        }
+        #endregion
+
+        #endregion
+
+        #region Lang
+        private new void LoadDefaultMessages()
+        {
+            PrintWarning("Языковой файл загружается...");
+            lang.RegisterMessages(new Dictionary<string, string>
             {
-                foreach (KeyValuePair<string, ImageData> item in _images)
-                    if(item.Value.Status == ImageStatus.Loaded)
-                        if (item.Value?.Id != null)
-                            FileStorage.server.Remove(uint.Parse(item.Value.Id), FileStorage.Type.png, CommunityEntity.ServerInstance.net.ID);
+                ["FUNC_MESSAGE_MUTE_CHAT"] = "{0} muted {1} for {2}\nReason : {3}",
+                ["FUNC_MESSAGE_UNMUTE_CHAT"] = "{0} unmuted {1}",
+                ["FUNC_MESSAGE_MUTE_VOICE"] = "{0} muted voice to {1} for {2}\nReason : {3}",
+                ["FUNC_MESSAGE_UNMUTE_VOICE"] = "{0} unmuted voice to {1}",
+                ["FUNC_MESSAGE_MUTE_ALL_CHAT"] = "Chat disabled",
+                ["FUNC_MESSAGE_UNMUTE_ALL_CHAT"] = "Chat enabled",
+                ["FUNC_MESSAGE_MUTE_ALL_VOICE"] = "Voice chat disabled",
+                ["FUNC_MESSAGE_UNMUTE_ALL_VOICE"] = "Voice chat enabled",
+                ["FUNC_MESSAGE_MUTE_ALL_ALERT"] = "Блокировка Администратором",
+                ["FUNC_MESSAGE_PM_TURN_FALSE"] = "Игрок запретил присылать себе личные сообщения",
+                ["FUNC_MESSAGE_ALERT_TURN_FALSE"] = "Игрок запретил уведомлять себя",
 
-                _images?.Clear();
-            }
+                ["FUNC_MESSAGE_ISMUTED_TRUE"] = "You can not send the messages {0}\nYou are muted",
+                ["FUNC_MESSAGE_NO_ARG_BROADCAST"] = "You can not send an empty broadcast message!",
 
-            private IEnumerator ProcessDownloadImage(KeyValuePair<string, ImageData> image)
+                ["UI_ALERT_TITLE"] = "<size=14><b>Уведомление</b></size>",
+
+                ["UI_TITLE_PANEL_LABEL"] = "<size=25>НАСТРОЙКА ЧАТА</size>",
+                ["UI_CHAT_PANEL_PREFIX_TITLE"] = "<size=20><b>ПРЕФИКС:</b></size>",
+                ["UI_CHAT_PANEL_CHAT_TITLE"] = "<size=20><b>ЧАТ:</b></size>",
+                ["UI_CHAT_PANEL_NICK_TITLE"] = "<size=20><b>НИК:</b></size>",
+                ["UI_CHAT_PANEL_RANK_TITLE"] = "<size=20><b>РАНГ:</b></size>",
+
+                ["UI_CHAT_PANEL_SETTINGS_TITLE"] = "<size=30><b>НАСТРОЙКИ:</b></size>",
+                ["UI_CHAT_PANEL_SETTINGS_PM_TITLE"] = "<size=15><b>ЛИЧНЫЕ СООБЩЕНИЯ</b></size>",
+                ["UI_CHAT_PANEL_SETTINGS_ALERT_TITLE"] = "<size=15><b>УПОМИНАНИЯ В ЧАТЕ</b></size>",
+                ["UI_CHAT_PANEL_SETTINGS_BROADCAST_TITLE"] = "<size=15><b>ОПОВЕЩЕНИЕ В ЧАТЕ</b></size>",
+                ["UI_CHAT_PANEL_SETTINGS_SOUND_TITLE"] = "<size=13><b>ЗВУКОВОЕ ОПОВЕЩЕНИЕ</b></size>",
+                ["UI_CHAT_PANEL_SETTINGS_GLOBAL_TITLE"] = "<size=13><b>ГЛОБАЛЬНЫЙ ЧАТ</b></size>",
+
+                ["UI_CHAT_PANEL_INFORMATION_TITLE"] = "<size=30><b>ИНФОРМАЦИЯ:</b></size>",
+                ["UI_CHAT_PANEL_INFORMATION_NICK_TITLE"] = "<size=20><b>ВАШ НИК: {0}</b></size>",
+                ["UI_CHAT_PANEL_INFORMATION_MUTED_TITLE"] = "<size=20><b>БЛОКИРОВКА ЧАТА: <color=#cc4228>{0}</color></b></size>",
+                ["UI_CHAT_PANEL_INFORMATION_MUTED_TITLE_NOT"] = "<size=20><b><color=#A7F64FFF>ОТСУТСТВУЕТ</color></b></size>",
+                ["UI_CHAT_PANEL_INFORMATION_IGNORED_TITLE"] = "<size=20><b>ИГНОРИРОВАНИЕ :</b></size>",
+                ["UI_CHAT_PANEL_INFORMATION_IGNORED_BUTTON_TITLE"] = "<size=15><b>{0} ЧЕЛОВЕК(А)</b></size>",
+
+                ["UI_CHAT_PANEL_MODERATOR_TITLE"] = "<size=30><b>ПАНЕЛЬ МОДЕРАТОРА:</b></size>",
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_BUTTON_TITLE"] = "<size=17><b>УПРАВЛЕНИЕ БЛОКИРОВКАМИ ЧАТА</b></size>",
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_CHAT_ALL_BUTTON_TITLE"] = "<size=17><b>ЗАБЛОКИРОВАТЬ ВСЕМ ЧАТ</b></size>",
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_VOICE_ALL_BUTTON_TITLE"] = "<size=17><b>ЗАБЛОКИРОВАТЬ ВСЕМ ГОЛОС</b></size>",
+                ["UI_CHAT_PANEL_MODERATOR_UNMUTE_CHAT_ALL_BUTTON_TITLE"] = "<size=17><b>РАЗБЛОКИРОВАТЬ ВСЕМ ЧАТ</b></size>",
+                ["UI_CHAT_PANEL_MODERATOR_UNMUTE_VOICE_ALL_BUTTON_TITLE"] = "<size=17><b>РАЗБЛОКИРОВАТЬ ВСЕМ ГОЛОС</b></size>",
+
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TITLE"] = "<size=25>УПРАВЛЕНИЕ БЛОКИРОВКАМИ ЧАТА</size>",
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TITLE_SEARCH"] = "<size=25>ПОИСК</size>",
+
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_MUTE_TITLE"] = "<size=20>ВЫБЕРИТЕ ДЕЙСТВИЕ</size>",
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_REASON_MUTE_TITLE"] = "<size=20>ВЫБЕРИТЕ ПРИЧИНУ БЛОКИРОВКИ</size>",
+
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_VOICE"] = "<size=20>ЗАБЛОКИРОВАТЬ ГОЛОСОВОЙ ЧАТ</size>",
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_CHAT"] = "<size=20>ЗАБЛОКИРОВАТЬ ЧАТ</size>",
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_VOICE_UNMUTE"] = "<size=20>РАЗБЛОКИРОВАТЬ ГОЛОСОВОЙ ЧАТ</size>",
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_CHAT_UNMUTE"] = "<size=20>РАЗБЛОКИРОВАТЬ ЧАТ</size>",
+
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_CHAT_ACTION_ACCESS"] = "<size=35>УСПЕШНО</size>",
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_CHAT_ACTION_NOT_CONNNECTED"] = "<size=30>ИГРОК ВЫШЕЛ С СЕРВЕРА</size>",
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_CHAT_ACTION_ITSMUTED"] = "<size=30>ИГРОК УЖЕ ЗАМУЧЕН</size>",
+
+                ["UI_CHAT_PANEL_IGNORED_MENU_TITLE"] = "<size=25>УПРАВЛЕНИЕ ИГНОРИРОВАНИЕМ</size>",
+                ["UI_CHAT_PANEL_IGNORED_MENU_TITLE_ALERT_ADD_IGNORED"] = "<size=20>ВЫ УВЕРЕНЫ, ЧТО ХОТИТЕ ДОБАВИТЬ {0} В ИГНОРИРОВАНИЕ?</size>",
+                ["UI_CHAT_PANEL_IGNORED_MENU_TITLE_ALERT_REMOVE_IGNORED"] = "<size=20>ВЫ УВЕРЕНЫ, ЧТО ХОТИТЕ УБРАТЬ {0} ИЗ ИГНОРИРОВАНИЯ?</size>",
+                ["UI_CHAT_PANEL_IGNORED_MENU_TITLE_ALERT_YES_BUTTON"] = "<size=20>ДА, Я УВЕРЕН</size>",
+                ["UI_CHAT_PANEL_IGNORED_MENU_TITLE_ALERT_NO_BUTTON"] = "<size=20>НЕТ, Я ПЕРЕДУМАЛ</size>",
+
+                ["UI_CHAT_PANEL_TAKE_PREFIX"] = "<size=10>У ВАС НЕТ ДОСТУПНЫХ ПРЕФИКСОВ</size>",
+                ["UI_CHAT_PANEL_TAKE_PREFIX_MULTI"] = "<size=10>ВЫБЕРИТЕ ПРЕФИКСЫ</size>",
+                ["UI_CHAT_PANEL_TAKE_COLOR"] = "<size=10>У ВАС НЕТ ДОСТУПНЫХ ЦВЕТОВ</size>",
+                ["UI_CHAT_PANEL_TAKE_RANK"] = "<size=10>У ВАС НЕТ ДОСТУПНЫХ РАНГОВ</size>",
+
+                ["UI_CHAT_PAGE_CONTROLLER_DROP_LIST_COUNT"] = "<size=12>СТРАНИЦА {0}</size>",
+
+                ["UI_CHAT_MODAL_INSTRUCTION_TEXT"] = "<b><size=16>Данные настройки включают или отключают выбранный вами функционал чата</size></b><size=10>\n- Личные сообщения - отвечают за получения вами личных сообщений от любых пользователей\n- Оповщение в чате - отвечает за информативные или автоматические сообщения\n- Упоминания в чате - отвечают за @{0} упоминание вас в общем чате\n- Звуковые оповещения - данная функция отвечает за получение звуковых эффектов во время упоминания или личного сообщения\n- Глобальный чат - отвечает за получение каких-либо сообщений в чате</size>",
+
+                ["COMMAND_NOT_PERMISSION"] = "You dont have permissions to use this command",
+                ["COMMAND_RENAME_NOTARG"] = "For rename use : /rename New nickname",
+                ["COMMAND_RENAME_SUCCES"] = "You have successful changed your name to {0}",
+
+                ["COMMAND_PM_NOTARG"] = "To send pm use : /pm Nickname Message",
+                ["COMMAND_PM_NOT_NULL_MSG"] = "Message is empty!",
+                ["COMMAND_PM_NOT_USER"] = "User not found or offline",
+                ["COMMAND_PM_SUCCESS"] = "Your private message sent successful\nMessage : {0}",
+                ["COMMAND_PM_SEND_MSG"] = "Message from {0}\n{1}",
+
+                ["COMMAND_R_NOTARG"] = "For reply use : /r Message",
+                ["COMMAND_R_NOTMSG"] = "You dont have any private conversations yet!",
+
+                ["FLOODERS_MESSAGE"] = "You're typing too fast! Please Wait {0} seconds",
+
+                ["PREFIX_SETUP"] = "You have successfully removed the prefix {0}, it is already activated and installed",
+                ["COLOR_CHAT_SETUP"] = "You have successfully picked up the <color={0}>chat color</color>, it is already activated and installed",
+                ["COLOR_NICK_SETUP"] = "You have successfully taken the <color={0}>nickname color</color>, it is already activated and installed",
+
+                ["PREFIX_RETURNRED"] = "Your prefix {0} expired, it was reset automatically",
+                ["COLOR_CHAT_RETURNRED"] = "Action of your <color={0}>color chat</color> over, it is reset automatically",
+                ["COLOR_NICK_RETURNRED"] = "Action of your <color={0}>color nick</color> over, it is reset automatically",
+
+                ["WELCOME_PLAYER"] = "{0} came online",
+                ["LEAVE_PLAYER"] = "{0} left",
+                ["WELCOME_PLAYER_WORLD"] = "{0} came online. Country: {1}",
+                ["LEAVE_PLAYER_REASON"] = "{0} left. Reason: {1}",
+
+                ["IGNORE_ON_PLAYER"] = "You added {0} in black list",
+                ["IGNORE_OFF_PLAYER"] = "You removed {0} from black list",
+                ["IGNORE_NO_PM"] = "This player added you in black list. Your message has not been delivered.",
+                ["IGNORE_NO_PM_ME"] = "You added this player in black list. Your message has not been delivered.",
+                ["INGORE_NOTARG"] = "To ignore a player use : /ignore nickname",
+
+                ["DISCORD_SEND_LOG_CHAT"] = "Player : {0}({1})\nFiltred message : {2}\nMessage : {3}",
+                ["DISCORD_SEND_LOG_MUTE"] = "{0}({1}) give mute chat\nSuspect : {2}({3})\nReason : {4}",
+            }, this);
+
+            lang.RegisterMessages(new Dictionary<string, string>
             {
-                string url = "file://" + Interface.Oxide.DataDirectory + Path.DirectorySeparatorChar + _path + image.Key + ".png";
+                ["FUNC_MESSAGE_MUTE_CHAT"] = "{0} заблокировал чат игроку {1} на {2}\nПричина : {3}",
+                ["FUNC_MESSAGE_UNMUTE_CHAT"] = "{0} разблокировал чат игроку {1}",
+                ["FUNC_MESSAGE_MUTE_VOICE"] = "{0} заблокировал голос игроку {1} на {2}\nПричина : {3}",
+                ["FUNC_MESSAGE_UNMUTE_VOICE"] = "{0} разблокировал голос игроку {1}",
+                ["FUNC_MESSAGE_MUTE_ALL_CHAT"] = "Всем игрокам был заблокирован чат",
+                ["FUNC_MESSAGE_UNMUTE_ALL_CHAT"] = "Всем игрокам был разблокирован чат",
+                ["FUNC_MESSAGE_MUTE_ALL_VOICE"] = "Всем игрокам был заблокирован голос",
+                ["FUNC_MESSAGE_MUTE_ALL_ALERT"] = "Блокировка Администратором",
+                ["FUNC_MESSAGE_UNMUTE_ALL_VOICE"] = "Всем игрокам был разблокирован голос",
 
-                using (UnityWebRequest www = UnityWebRequestTexture.GetTexture(url))
+                ["FUNC_MESSAGE_PM_TURN_FALSE"] = "Игрок запретил присылать себе личные сообщения",
+                ["FUNC_MESSAGE_ALERT_TURN_FALSE"] = "Игрок запретил уведомлять себя",
+
+                ["FUNC_MESSAGE_ISMUTED_TRUE"] = "Вы не можете отправлять сообщения еще {0}\nВаш чат заблокирован",
+                ["FUNC_MESSAGE_NO_ARG_BROADCAST"] = "Вы не можете отправлять пустое сообщение в оповещение!",
+
+                ["UI_ALERT_TITLE"] = "<size=14><b>Уведомление</b></size>",
+
+                ["UI_TITLE_PANEL_LABEL"] = "<size=25>НАСТРОЙКА ЧАТА</size>",
+                ["UI_CHAT_PANEL_PREFIX_TITLE"] = "<size=20><b>ПРЕФИКС:</b></size>",
+                ["UI_CHAT_PANEL_CHAT_TITLE"] = "<size=20><b>ЧАТ:</b></size>",
+                ["UI_CHAT_PANEL_NICK_TITLE"] = "<size=20><b>НИК:</b></size>",
+                ["UI_CHAT_PANEL_RANK_TITLE"] = "<size=20><b>РАНГ:</b></size>",
+
+                ["UI_CHAT_PANEL_SETTINGS_TITLE"] = "<size=30><b>НАСТРОЙКИ:</b></size>",
+                ["UI_CHAT_PANEL_SETTINGS_PM_TITLE"] = "<size=15><b>ЛИЧНЫЕ СООБЩЕНИЯ</b></size>",
+                ["UI_CHAT_PANEL_SETTINGS_ALERT_TITLE"] = "<size=15><b>УПОМИНАНИЯ В ЧАТЕ</b></size>",
+                ["UI_CHAT_PANEL_SETTINGS_BROADCAST_TITLE"] = "<size=15><b>ОПОВЕЩЕНИЕ В ЧАТЕ</b></size>",
+                ["UI_CHAT_PANEL_SETTINGS_SOUND_TITLE"] = "<size=13><b>ЗВУКОВОЕ ОПОВЕЩЕНИЕ</b></size>",
+                ["UI_CHAT_PANEL_SETTINGS_GLOBAL_TITLE"] = "<size=13><b>ГЛОБАЛЬНЫЙ ЧАТ</b></size>",
+
+                ["UI_CHAT_PANEL_INFORMATION_TITLE"] = "<size=30><b>ИНФОРМАЦИЯ:</b></size>",
+                ["UI_CHAT_PANEL_INFORMATION_NICK_TITLE"] = "<size=20><b>ВАШ НИК: {0}</b></size>",
+                ["UI_CHAT_PANEL_INFORMATION_MUTED_TITLE"] = "<size=20><b>БЛОКИРОВКА ЧАТА: <color=#cc4228>{0}</color></b></size>",
+                ["UI_CHAT_PANEL_INFORMATION_MUTED_TITLE_NOT"] = "<size=20><b><color=#A7F64FFF>ОТСУТСТВУЕТ</color></b></size>",
+                ["UI_CHAT_PANEL_INFORMATION_IGNORED_TITLE"] = "<size=20><b>ИГНОРИРОВАНИЕ :</b></size>",
+                ["UI_CHAT_PANEL_INFORMATION_IGNORED_BUTTON_TITLE"] = "<size=15><b>{0} ЧЕЛОВЕК(А)</b></size>",
+
+                ["UI_CHAT_PANEL_MODERATOR_TITLE"] = "<size=30><b>ПАНЕЛЬ МОДЕРАТОРА:</b></size>",
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_BUTTON_TITLE"] = "<size=17><b>УПРАВЛЕНИЕ БЛОКИРОВКАМИ ЧАТА</b></size>",
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_CHAT_ALL_BUTTON_TITLE"] = "<size=17><b>ЗАБЛОКИРОВАТЬ ВСЕМ ЧАТ</b></size>",
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_VOICE_ALL_BUTTON_TITLE"] = "<size=17><b>ЗАБЛОКИРОВАТЬ ВСЕМ ГОЛОС</b></size>",
+
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TITLE"] = "<size=25>УПРАВЛЕНИЕ БЛОКИРОВКАМИ ЧАТА</size>",
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TITLE_SEARCH"] = "<size=25>ПОИСК</size>",
+
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_MUTE_TITLE"] = "<size=20>ВЫБЕРИТЕ ДЕЙСТВИЕ</size>",
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_REASON_MUTE_TITLE"] = "<size=20>ВЫБЕРИТЕ ПРИЧИНУ БЛОКИРОВКИ</size>",
+
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_VOICE"] = "<size=20>ЗАБЛОКИРОВАТЬ ГОЛОСОВОЙ ЧАТ</size>",
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_CHAT"] = "<size=20>ЗАБЛОКИРОВАТЬ ЧАТ</size>",
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_VOICE_UNMUTE"] = "<size=20>РАЗБЛОКИРОВАТЬ ГОЛОСОВОЙ ЧАТ</size>",
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_CHAT_UNMUTE"] = "<size=20>РАЗБЛОКИРОВАТЬ ЧАТ</size>",
+
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_CHAT_ACTION_ACCESS"] = "<size=35>УСПЕШНО</size>",
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_CHAT_ACTION_NOT_CONNNECTED"] = "<size=30>ИГРОК ВЫШЕЛ С СЕРВЕРА</size>",
+                ["UI_CHAT_PANEL_MODERATOR_MUTE_PANEL_TAKE_TYPE_CHAT_ACTION_ITSMUTED"] = "<size=30>ИГРОК УЖЕ ЗАМУЧЕН</size>",
+
+                ["UI_CHAT_PANEL_IGNORED_MENU_TITLE"] = "<size=25>УПРАВЛЕНИЕ ИГНОРИРОВАНИЕМ</size>",
+                ["UI_CHAT_PANEL_IGNORED_MENU_TITLE_ALERT_ADD_IGNORED"] = "<size=20>ВЫ УВЕРЕНЫ, ЧТО ХОТИТЕ ДОБАВИТЬ {0} В ИГНОРИРОВАНИЕ?</size>",
+                ["UI_CHAT_PANEL_IGNORED_MENU_TITLE_ALERT_REMOVE_IGNORED"] = "<size=20>ВЫ УВЕРЕНЫ, ЧТО ХОТИТЕ УБРАТЬ {0} ИЗ ИГНОРИРОВАНИЯ?</size>",
+                ["UI_CHAT_PANEL_IGNORED_MENU_TITLE_ALERT_YES_BUTTON"] = "<size=20>ДА, Я УВЕРЕН</size>",
+                ["UI_CHAT_PANEL_IGNORED_MENU_TITLE_ALERT_NO_BUTTON"] = "<size=20>НЕТ, Я ПЕРЕДУМАЛ</size>",
+
+                ["UI_CHAT_PANEL_TAKE_PREFIX"] = "<size=10>У ВАС НЕТ ДОСТУПНЫХ ПРЕФИКСОВ</size>",
+                ["UI_CHAT_PANEL_TAKE_PREFIX_MULTI"] = "<size=10>ВЫБЕРИТЕ ПРЕФИКСЫ</size>",
+                ["UI_CHAT_PANEL_TAKE_COLOR"] = "<size=10>У ВАС НЕТ ДОСТУПНЫХ ЦВЕТОВ</size>",
+                ["UI_CHAT_PANEL_TAKE_RANK"] = "<size=10>У ВАС НЕТ ДОСТУПНЫХ РАНГОВ</size>",
+
+                ["UI_CHAT_PAGE_CONTROLLER_DROP_LIST_COUNT"] = "<size=12>СТРАНИЦА {0}</size>",
+
+                ["UI_CHAT_MODAL_INSTRUCTION_TEXT"] = "<b><size=16>Данные настройки включают или отключают выбранный вами функционал чата</size></b><size=10>\n- Личные сообщения - отвечают за получения вами личных сообщений от любых пользователей\n- Оповщение в чате - отвечает за информативные или автоматические сообщения\n- Упоминания в чате - отвечают за @{0} упоминание вас в общем чате\n- Звуковые оповещения - данная функция отвечает за получение звуковых эффектов во время упоминания или личного сообщения\n- Глобальный чат - отвечает за получение каких-либо сообщений в чате</size>",
+
+                ["COMMAND_NOT_PERMISSION"] = "У вас недостаточно прав для данной команды",
+                ["COMMAND_RENAME_NOTARG"] = "Используйте команду так : /rename Новый Ник",
+                ["COMMAND_RENAME_SUCCES"] = "Вы успешно изменили ник на {0}",
+
+                ["COMMAND_PM_NOTARG"] = "Используйте команду так : /pm Ник Игрока Сообщение",
+                ["COMMAND_PM_NOT_NULL_MSG"] = "Вы не можете отправлять пустое сообщение",
+                ["COMMAND_PM_NOT_USER"] = "Игрок не найден или не в сети",
+                ["COMMAND_PM_SUCCESS"] = "Ваше сообщение успешно доставлено\nСообщение : {0}",
+                ["COMMAND_PM_SEND_MSG"] = "Сообщение от {0}\n{1}",
+
+                ["COMMAND_R_NOTARG"] = "Используйте команду так : /r Сообщение",
+                ["COMMAND_R_NOTMSG"] = "Вам или вы ещё не писали игроку в личные сообщения!",
+
+                ["FLOODERS_MESSAGE"] = "Вы пишите слишком быстро! Подождите {0} секунд",
+
+                ["PREFIX_SETUP"] = "Вы успешно забрали префикс {0}, он уже активирован и установлен",
+                ["COLOR_CHAT_SETUP"] = "Вы успешно забрали <color={0}>цвет чата</color>, он уже активирован и установлен",
+                ["COLOR_NICK_SETUP"] = "Вы успешно забрали <color={0}>цвет ника</color>, он уже активирован и установлен",
+
+                ["PREFIX_RETURNRED"] = "Действие вашего префикса {0} окончено, он сброшен автоматически",
+                ["COLOR_CHAT_RETURNRED"] = "Действие вашего <color={0}>цвета чата</color> окончено, он сброшен автоматически",
+                ["COLOR_NICK_RETURNRED"] = "Действие вашего <color={0}>цвет чата</color> окончено, он сброшен автоматически",
+
+                ["WELCOME_PLAYER"] = "{0} зашел на сервер",
+                ["LEAVE_PLAYER"] = "{0} вышел с сервера",
+                ["WELCOME_PLAYER_WORLD"] = "{0} зашел на сервер.Из {1}",
+                ["LEAVE_PLAYER_REASON"] = "{0} вышел с сервера.Причина {1}",
+
+                ["IGNORE_ON_PLAYER"] = "Вы добавили игрока {0} в черный список",
+                ["IGNORE_OFF_PLAYER"] = "Вы убрали игрока {0} из черного списка",
+                ["IGNORE_NO_PM"] = "Данный игрок добавил вас в ЧС,ваше сообщение не будет доставлено",
+                ["IGNORE_NO_PM_ME"] = "Вы добавили данного игрока в ЧС,ваше сообщение не будет доставлено",
+                ["INGORE_NOTARG"] = "Используйте команду так : /ignore Ник Игрока",
+
+                ["DISCORD_SEND_LOG_CHAT"] = "Игрок : {0}({1})\nФильтрованное сообщение : {2}\nИзначальное сообщение : {3}",
+                ["DISCORD_SEND_LOG_MUTE"] = "{0}({1}) выдал блокировку чата\nИгрок : {2}({3})\nПричина : {4}",
+            }, this, "ru");
+           
+            PrintWarning("Языковой файл загружен успешно");
+        }
+        #endregion
+
+        #region Helpers
+        public void Log(string LoggedMessage) => LogToFile("IQChatLogs", LoggedMessage, this);
+        public static string FormatTime(TimeSpan time)
+        {
+            string result = string.Empty;
+            if (time.Days != 0)
+                result += $"{Format(time.Days, "дней", "дня", "день")} ";
+
+            if (time.Hours != 0)
+                result += $"{Format(time.Hours, "часов", "часа", "час")} ";
+
+            if (time.Minutes != 0)
+                result += $"{Format(time.Minutes, "минут", "минуты", "минута")} ";
+
+            if (time.Seconds != 0)
+                result += $"{Format(time.Seconds, "секунд", "секунды", "секунд")} ";
+
+            return result;
+        }
+        private static string Format(int units, string form1, string form2, string form3)
+        {
+            var tmp = units % 10;
+
+            if (units >= 5 && units <= 20 || tmp >= 5 && tmp <= 9)
+                return $"{units} {form1}";
+
+            if (tmp >= 2 && tmp <= 4)
+                return $"{units} {form2}";
+
+            return $"{units} {form3}";
+        }
+        private static string HexToRustFormat(string hex)
+        {
+            Color color;
+            ColorUtility.TryParseHtmlString(hex, out color);
+            sb.Clear();
+            return sb.AppendFormat("{0:F2} {1:F2} {2:F2} {3:F2}", color.r, color.g, color.b, color.a).ToString();
+        }
+        #endregion
+
+        #region ChatFunc
+
+        public Dictionary<ulong, double> Flooders = new Dictionary<ulong, double>();
+        void ReplyChat(Chat.ChatChannel channel, BasePlayer player, string OutMessage)
+        {
+            var MessageSetting = config.MessageSetting;
+            if (MessageSetting.AntiSpamActivate)
+                if (!permission.UserHasPermission(player.UserIDString, MessageSetting.PermAdminImmunitetAntispam))
                 {
-                    yield return www.SendWebRequest();
-		   		 		  						  	   		  		 			  		  		  			 		   			
-                    if (www.isNetworkError || www.isHttpError)
-                    {
-                        image.Value.Status = ImageStatus.Failed;
-                    }
+                    if (!Flooders.ContainsKey(player.userID))
+                        Flooders.Add(player.userID, CurrentTime() + MessageSetting.FloodTime);
                     else
-                    {
-                        Texture2D tex = DownloadHandlerTexture.GetContent(www);
-                        image.Value.Id = FileStorage.server.Store(tex.EncodeToPNG(), FileStorage.Type.png, CommunityEntity.ServerInstance.net.ID).ToString();
-                        image.Value.Status = ImageStatus.Loaded;
-                        UnityEngine.Object.DestroyImmediate(tex);
-                    }
+                        if (Flooders[player.userID] > CurrentTime())
+                        {
+                            ReplySystem(Chat.ChatChannel.Global, player, GetLang("FLOODERS_MESSAGE", player.UserIDString, Convert.ToInt32(Flooders[player.userID] - CurrentTime())));
+                            return;
+                        }
 
-                    DownloadImage();
+                    Flooders[player.userID] = MessageSetting.FloodTime + CurrentTime();
+                }
+
+            if (channel == Chat.ChatChannel.Global)
+            {
+                var List = IQModalMenu ? BasePlayer.activePlayerList.Where(p => ChatSettingUser[p.userID].GlobalChatTurn) : BasePlayer.activePlayerList;
+                foreach (BasePlayer p in List)
+                {
+                    if (OutMessage.Contains("@")) 
+                    {
+                        if (OutMessage.ToLower().Contains(p.displayName.ToLower()))
+                            if (ChatSettingUser[p.userID].AlertTurn)
+                            {
+                                ReplySystem(Chat.ChatChannel.Global, p, $"<size=16>{OutMessage}</size>", MessageSetting.AlertPlayerTitle, player.UserIDString, MessageSetting.AlertPlayerColor);
+                                Effect.server.Run(MessageSetting.SoundAlertPlayer, p.GetNetworkPosition());
+                            } else p.SendConsoleCommand("chat.add", new object[] { (int)channel, player.userID, OutMessage });
+                         else p.SendConsoleCommand("chat.add", new object[] { (int)channel, player.userID, OutMessage });
+                    }
+                    else p.SendConsoleCommand("chat.add", new object[] { (int)channel, player.userID, OutMessage });
+                }
+
+                PrintToConsole(OutMessage);
+            }
+            if (channel == Chat.ChatChannel.Team)
+            {
+                RelationshipManager.PlayerTeam Team = RelationshipManager.ServerInstance.FindTeam(player.currentTeam);
+                if (Team == null) return;
+                foreach (var FindPlayers in Team.members)
+                {
+                    BasePlayer TeamPlayer = BasePlayer.FindByID(FindPlayers);
+                    if (TeamPlayer == null) continue;
+
+                    TeamPlayer.SendConsoleCommand("chat.add", channel, player.userID, OutMessage);
+                }
+            }
+            if (channel == Chat.ChatChannel.Cards)
+            {
+                if (!player.isMounted)
+                    return;
+
+                CardTable cardTable = player.GetMountedVehicle() as CardTable;
+                if (cardTable == null || !cardTable.GameController.PlayerIsInGame(player))
+                    return;
+
+                List<Network.Connection> PlayersCards = new List<Network.Connection>();
+                cardTable.GameController.GetConnectionsInGame(PlayersCards);
+                if (PlayersCards == null || PlayersCards.Count == 0)
+                    return;
+
+                foreach (var PCard in PlayersCards)
+                {
+                    BasePlayer PlayerInRound = BasePlayer.FindByID(PCard.userid);
+                    if (PlayerInRound == null) return;
+                    PlayerInRound.SendConsoleCommand("chat.add", channel, player.userID, OutMessage);
                 }
             }
         }
-        void OnPlayerConnected(BasePlayer player)
+
+        void ReplySystem(Chat.ChatChannel channel, BasePlayer player, string Message,string CustomPrefix = "", string CustomAvatar = "", string CustomHex = "")
         {
-            UserConnecteionData(player);
-            AlertController(player);
+            string Prefix = string.IsNullOrEmpty(CustomPrefix) ? config.MessageSetting.BroadcastTitle : CustomPrefix;
+            ulong Avatar = string.IsNullOrEmpty(CustomAvatar) ? config.MessageSetting.Steam64IDAvatar : ulong.Parse(CustomAvatar);
+            string Hex = string.IsNullOrEmpty(CustomHex) ? config.MessageSetting.BroadcastColor : CustomHex;
+
+            string FormatMessage = $"{Prefix}<color={Hex}>{Message}</color>";
+            if (channel == Chat.ChatChannel.Global)
+                player.SendConsoleCommand("chat.add", channel, Avatar, FormatMessage);         
         }
 
-        private String GetPlayerFormat(String displayName, String userId)
+        void ReplyBroadcast(string Message, string CustomPrefix = "", string CustomAvatar = "", Boolean AdminAlert = false)
         {
-            if (!UInt64.TryParse(userId, out UInt64 userID)) return $"<color=54aafe>{displayName}</color>";
-            
-            GeneralInformation.RenameInfo Renamer = GeneralInfo.GetInfoRename(userID);
-            String NickNamed = Renamer != null ? $"{Renamer.RenameNick ?? displayName}" : displayName;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            User Info = UserInformation[userID];
-            Configuration.ControllerParameters ControllerParameter = config.ControllerParameter;
+            foreach (var p in !AdminAlert ? BasePlayer.activePlayerList.Where(p => ChatSettingUser[p.userID].BroadcastTurn || (IQModalMenu && ChatSettingUser[p.userID].GlobalChatTurn)) : BasePlayer.activePlayerList)
+                ReplySystem(Chat.ChatChannel.Global, p, Message, CustomPrefix, CustomAvatar);
+        }
 
-            String Prefixes = String.Empty;
-            String ColorNickPlayer = String.IsNullOrWhiteSpace(Info.Info.ColorNick) ? "#54aafe" : Info.Info.ColorNick;
+        static DateTime epoch = new DateTime(1970, 1, 1, 0, 0, 0);
+        static double CurrentTime() => DateTime.UtcNow.Subtract(epoch).TotalSeconds;
+        
+        #endregion
 
-            String DisplayName = NickNamed;
-            
-            Object resultColorNick = IsGradientColorValue(ColorNickPlayer);
-            if (resultColorNick is List<String> gradientColors)
-                DisplayName = ApplyGradientToText(DisplayName, gradientColors);
-            else DisplayName = $"<color={ColorNickPlayer}>{DisplayName}</color>";
-            
-            if (ControllerParameter.Prefixes.TurnMultiPrefixes)
+        #region API
+
+        void API_SEND_PLAYER(BasePlayer player,string PlayerFormat, string Message, string Avatar, Chat.ChatChannel channel = Chat.ChatChannel.Global)
+        {
+            var MessageSettings = config.MessageSetting;
+            string OutMessage = Message;
+
+            if (MessageSettings.FormatingMessage)
+                OutMessage = $"{Message.ToLower().Substring(0, 1).ToUpper()}{Message.Remove(0, 1).ToLower()}";
+
+            if (MessageSettings.UseBadWords)
+                foreach (var DetectedMessage in OutMessage.Split(' '))
+                    if (MessageSettings.BadWords.Contains(DetectedMessage.ToLower()))
+                        OutMessage = OutMessage.Replace(DetectedMessage, MessageSettings.ReplaceBadWord);
+
+            player.SendConsoleCommand("chat.add", channel, ulong.Parse(Avatar), $"{PlayerFormat}: {OutMessage}");
+            PrintToConsole($"{PlayerFormat}: {OutMessage}");
+        }
+        void API_SEND_PLAYER_PM(BasePlayer player, string DisplayName, string Message)
+        {
+            ReplySystem(Chat.ChatChannel.Global, player, GetLang("COMMAND_PM_SEND_MSG", player.UserIDString, DisplayName, Message));
+            if(ChatSettingUser[player.userID].SoundTurn)
+            Effect.server.Run(config.MessageSetting.SoundPM, player.GetNetworkPosition());
+        }
+        void API_SEND_PLAYER_CONNECTED(BasePlayer player, string DisplayName, string country, string userID)
+        {
+            var Alert = config.AlertSettings;
+            if (Alert.ConnectedAlert)
             {
-                if (Info.Info.PrefixList != null)
-                    Prefixes = String.Join("", Info.Info.PrefixList.Take(ControllerParameter.Prefixes.MaximumMultiPrefixCount));
+                string Avatar = Alert.ConnectedAvatarUse ? userID : "";
+                if (config.AlertSettings.ConnectedWorld)
+                     ReplyBroadcast(GetLang("WELCOME_PLAYER_WORLD", player.UserIDString, DisplayName, country), "", Avatar);   
+                else ReplyBroadcast(GetLang("WELCOME_PLAYER", player.UserIDString, DisplayName), "", Avatar);
             }
-            else Prefixes = Info.Info.Prefix;
-
-            String ResultName = $"{Prefixes}{DisplayName}";
-
-            return ResultName;
         }
-        private void DrawUI_IQChat_Update_MuteChat_All(BasePlayer player)
+        void API_SEND_PLAYER_DISCONNECTED(BasePlayer player, string DisplayName, string reason, string userID)
         {
-            if (!permission.UserHasPermission(player.UserIDString, PermissionMutedAdmin)) return;
-
-            String InterfaceAdministratorChat = InterfaceBuilder.GetInterface("UI_Chat_Administation_AllChat");
-            if (InterfaceAdministratorChat == null) return;
-		   		 		  						  	   		  		 			  		  		  			 		   			
-            InterfaceAdministratorChat = InterfaceAdministratorChat.Replace("%TEXT_MUTE_ALLCHAT%", GetLang(!GeneralInfo.TurnMuteAllChat ? "IQCHAT_BUTTON_MODERATION_MUTE_ALL_CHAT" : "IQCHAT_BUTTON_MODERATION_UNMUTE_ALL_CHAT", player.UserIDString));
-            InterfaceAdministratorChat = InterfaceAdministratorChat.Replace("%COMMAND_MUTE_ALLCHAT%", $"newui.cmd action.mute.ignore mute.controller {SelectedAction.Mute} mute.all.chat");
-
-            CuiHelper.DestroyUi(player, "ModeratorMuteAllChat");
-            CuiHelper.AddUi(player, InterfaceAdministratorChat);
-        }
-
-        
-        
-        private void ConsoleOrPrintMessage(BasePlayer player, String Messages)
-        {
-            if (player != null)
-                player.ConsoleMessage(Messages);
-            else PrintWarning(Messages);
-        }
-		   		 		  						  	   		  		 			  		  		  			 		   			
+            var Alert = config.AlertSettings;
+            if (Alert.DisconnectedAlert)
+            {
+                string Avatar = Alert.ConnectedAvatarUse ? userID : "";
+                string LangLeave = config.AlertSettings.DisconnectedReason ? GetLang("LEAVE_PLAYER_REASON",player.UserIDString, DisplayName, reason) : GetLang("LEAVE_PLAYER", player.UserIDString, DisplayName);
+                ReplyBroadcast(LangLeave, "", Avatar);
             }
+        }
+        void API_ALERT(string Message, Chat.ChatChannel channel = Chat.ChatChannel.Global, string CustomPrefix = "", string CustomAvatar = "", string CustomHex = "")
+        {
+            foreach (var p in BasePlayer.activePlayerList)
+                ReplySystem(channel, p, Message, CustomPrefix, CustomAvatar, CustomHex);
+        }
+        void API_ALERT_PLAYER(BasePlayer player,string Message, string CustomPrefix = "", string CustomAvatar = "", string CustomHex = "") => ReplySystem(Chat.ChatChannel.Global, player, Message, CustomPrefix, CustomAvatar, CustomHex);
+        void API_ALERT_PLAYER_UI(BasePlayer player, string Message) => UIAlert(player, Message);
+        bool API_CHECK_MUTE_CHAT(ulong ID) => IsMutedUser(ID);
+        bool API_CHECK_VOICE_CHAT(ulong ID) => IsMutedVoiceUser(ID);
+        bool API_IS_IGNORED(ulong UserHas, ulong User) => IsIgnored(UserHas, User);
+        string API_GET_PREFIX(ulong ID)
+        {
+            var DataPlayer = ChatSettingUser[ID];
+            return DataPlayer.ChatPrefix;
+        }
+        string API_GET_CHAT_COLOR(ulong ID)
+        {
+            var DataPlayer = ChatSettingUser[ID];
+            return DataPlayer.MessageColor;
+        }
+        string API_GET_NICK_COLOR(ulong ID)
+        {
+            var DataPlayer = ChatSettingUser[ID];
+            return DataPlayer.NickColor;
+        }
+        string API_GET_DEFUALT_PRFIX() => (string)config.AutoSetupSetting.ReturnDefaultSetting.PrefixDefault;
+        string API_GET_DEFUALT_COLOR_NICK() => (string)config.AutoSetupSetting.ReturnDefaultSetting.NickDefault;
+        string API_GET_DEFUALT_COLOR_CHAT() => (string)config.AutoSetupSetting.ReturnDefaultSetting.MessageDefault;
+        #endregion
+
+        #region IQModalMenu
+
+        #region Command
+
+        [ConsoleCommand("iq.chat.modal")]
+        private void ConsoleCommandChatModal(ConsoleSystem.Arg arg)
+        {
+            if (!IQModalMenu) return;
+            BasePlayer player = arg.Player();
+            if (player == null) return;
+
+            IQChat_UI_Modal(player);
+        }
+
+        #endregion
+
+        #region Interface
+        private static string IQMODAL_CONTENT = "IQMODAL_CONTENT";
+
+        private void IQChat_UI_Modal(BasePlayer player)
+        {
+            CuiElementContainer container = new CuiElementContainer();
+            CuiHelper.DestroyUi(player, IQMODAL_CONTENT);
+            CuiHelper.DestroyUi(player, IQCHAT_PARENT_MAIN);
+            CuiHelper.DestroyUi(player, IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL);
+            CuiHelper.DestroyUi(player, IQCHAT_PARENT_MAIN_IGNORED_UI);
+            CuiHelper.DestroyUi(player, IQCHAT_PARENT_MAIN_CHAT_MUTE_PANEL);
+            CuiHelper.DestroyUi(player, IQCHAT_PARENT_MAIN_IGNORED_UI_TITLE);
+            CuiHelper.DestroyUi(player, IQCHAT_PARENT_MAIN_IGNORED_UI);
+            var Interface = config.InterfaceChat;
+            float FadeIn = 0.3f;
+            var DataPlayer = ChatSettingUser[player.userID];
+
+            container.Add(new CuiPanel
+            {
+                CursorEnabled = true,
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "0.9979 1" },
+                Image = { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexPanel) }
+            }, IQMODAL_CONTENT, IQCHAT_PARENT_MAIN_CHAT_PANEL);
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.04152405 0.921147", AnchorMax = "0.3166667 1" },
+                Text = { FadeIn = FadeIn, Text = lang.GetMessage("UI_TITLE_PANEL_LABEL", this, player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL, "TITLE_LABEL");
+
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0.94" },
+                Image = { FadeIn = FadeIn, Color = "0 0 0 0" }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT);
+
+            #region User Interface
+
+            #region Settings
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.4798867 0.9036886", AnchorMax = "0.7550293 0.9825416" },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_SETTINGS_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_SETTINGS");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.4798867 0.8688836", AnchorMax = "0.654023 0.9170448" },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_SETTINGS_PM_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_SETTINGS_PM_TITLE");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.4798867 0.8178514", AnchorMax = "0.654023 0.8660126" },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_SETTINGS_BROADCAST_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "UI_CHAT_PANEL_SETTINGS_BROADCAST_TITLE");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.4798867 0.7668192", AnchorMax = "0.654023 0.8149804" },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_SETTINGS_ALERT_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_SETTINGS_ALERT_TITLE");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.4798867 0.715787", AnchorMax = "0.654023 0.7639482" },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_SETTINGS_SOUND_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "UI_CHAT_PANEL_SETTINGS_SOUND_TITLE");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.4798867 0.6647548", AnchorMax = "0.654023 0.712916" },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_SETTINGS_GLOBAL_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "UI_CHAT_PANEL_SETTINGS_SOUND_TITLE");
+
+            container.Add(new CuiElement
+            {
+                Parent = IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT,
+                Name = "TURNED_PM_BOX",
+                Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexPanel) },
+                        new CuiRectTransformComponent{ AnchorMin = $"0.6080466 0.884999", AnchorMax = $"0.6229891 0.9172297" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.2", UseGraphicAlpha = true }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Parent = IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT,
+                Name = "TURNED_BROADCAST_BOX",
+                Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexPanel) },
+                        new CuiRectTransformComponent{ AnchorMin = $"0.6080466 0.8339668", AnchorMax = $"0.6229891 0.8661975" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.2", UseGraphicAlpha = true }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Parent = IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT,
+                Name = "TURNED_SOUND_BOX",
+                Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexPanel) },
+                        new CuiRectTransformComponent{ AnchorMin = $"0.6080466 0.7829346", AnchorMax = $"0.6229891 0.8151653" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.3", UseGraphicAlpha = true }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Parent = IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT,
+                Name = "TURNED_ALERT_BOX",
+                Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexPanel) },
+                        new CuiRectTransformComponent{ AnchorMin = $"0.6080466 0.7319024", AnchorMax = $"0.6229891 0.7641331" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.2", UseGraphicAlpha = true }
+                }
+            });
+
+            container.Add(new CuiElement
+            {
+                Parent = IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT,
+                Name = "TURNED_GLOBAL_CHAT_BOX",
+                Components =
+                {
+                        new CuiImageComponent { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexPanel) },
+                        new CuiRectTransformComponent{ AnchorMin = $"0.6080466 0.6808702", AnchorMax = $"0.6229891 0.7131009" },
+                        new CuiOutlineComponent { Color = HexToRustFormat(Interface.HexTitle), Distance = "-1.2 1.3", UseGraphicAlpha = true }
+                }
+            });
+
+            #endregion
+
+            #region Information
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.04152404 0.6500363", AnchorMax = "0.3436781 0.7209859" },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_INFORMATION_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_INFORMATION");
+
+            string FormatTimeMute = IsMutedUser(player.userID) ? FormatTime(TimeSpan.FromSeconds(DataPlayer.MuteChatTime - CurrentTime())) : GetLang("UI_CHAT_PANEL_INFORMATION_MUTED_TITLE_NOT", player.UserIDString);
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.04152404 0.5796079", AnchorMax = "0.4 0.6287344" },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_INFORMATION_MUTED_TITLE", player.UserIDString, FormatTimeMute), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_INFORMATION_MUTE_TIME");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.04152404 0.5326046", AnchorMax = "0.2 0.5817311" },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_INFORMATION_IGNORED_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_INFORMATION_IGNORED_TITLE");
+
+            container.Add(new CuiButton
+            {
+                RectTransform = { AnchorMin = $"0.2033799 0.5386046", AnchorMax = $"0.3609195 0.5797311" },
+                Button = { FadeIn = FadeIn, Command = "iq.chat ignore.controller open", Color = HexToRustFormat(Interface.HexButton) },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_INFORMATION_IGNORED_BUTTON_TITLE", player.UserIDString, DataPlayer.IgnoredUsers.Count), Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleCenter }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_INFORMATION_IGNORED_TITLE_COUNT");
+
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "0.998 0.2175566" },
+                Image = { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexTitle) }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "PANEL_INFO_INSTRUCTION");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.08908045 0", AnchorMax = "0.8988506 1" },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_MODAL_INSTRUCTION_TEXT",player.UserIDString, player.displayName), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleLeft }
+            },  "PANEL_INFO_INSTRUCTION", "PANEL_INFO_INSTRUCTION_LABEL");
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.8988506 0", AnchorMax = "1 1" },
+                Text = { FadeIn = FadeIn, Text = "<b><size=30>FAQ</size></b>", Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleCenter }
+            }, "PANEL_INFO_INSTRUCTION", "PANEL_INFO_INSTRUCTION_LABEL_FAQ");
+
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = "0.006321848 0.1012346", AnchorMax = "0.08333334 0.891358" },
+                Image = { Color = HexToRustFormat(Interface.HexLabel), Sprite = "assets/icons/player_assist.png" }
+            }, $"PANEL_INFO_INSTRUCTION", "PANEL_INFO_INSTRUCTION_SPRITE");
+
+            #endregion
+
+            #region Rank
+            if (IQRankSystem)
+                if (config.ReferenceSetting.IQRankSystems.UseRankSystem)
+                {
+                    container.Add(new CuiLabel
+                    {
+                        RectTransform = { AnchorMin = "0.04152405 0.761226", AnchorMax = "0.1568966 0.8103468" },
+                        Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_RANK_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+                    }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_RANK");
+
+                    container.Add(new CuiPanel
+                    {
+                        RectTransform = { AnchorMin = "0.1671733 0.7653192", AnchorMax = "0.3609195 0.81" },
+                        Image = { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexButton) }
+                    }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "RANK_TAKED_PANEL");
+                }
+
+            #endregion
+
+            #region Chat
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.04152405 0.8117096", AnchorMax = "0.1568966 0.8649233" },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_CHAT_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_CHAT");
+
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = "0.1671733 0.8198956", AnchorMax = "0.3609195 0.8645764" },
+                Image = { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexButton) }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "CHAT_TAKED_PANEL");
+
+            #endregion
+
+            #region Nick
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.04152405 0.8717443", AnchorMax = "0.1568966 0.9194997" },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_NICK_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_NICK");
+
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = "0.1671733 0.8744721", AnchorMax = "0.3609195 0.9191527" },
+                Image = { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexButton) }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "NICKED_TAKED_PANEL");
+
+            #endregion
+
+            #region Prefix
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.04152405 0.9222281", AnchorMax = "0.1568966 0.9740761" },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_PREFIX_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_PREFIX");
+
+            container.Add(new CuiPanel
+            {
+                RectTransform = { AnchorMin = "0.1671733 0.9290484", AnchorMax = "0.3609195 0.9737292" },
+                Image = { FadeIn = FadeIn, Color = HexToRustFormat(Interface.HexButton) }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "PREFIX_TAKED_PANEL");
+
+            #endregion
+
+            #region Moderation Panel
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.04152405 0.392139", AnchorMax = "0.4 0.4742948" },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_MODERATOR_TITLE", player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_SETTINGS");
+
+            if (permission.UserHasPermission(player.UserIDString, PermMuteMenu))
+            {
+                container.Add(new CuiButton
+                {
+                    RectTransform = { AnchorMin = $"0.04152405 0.3221469", AnchorMax = $"0.9584759 0.3930984" },
+                    Button = { FadeIn = FadeIn, Command = "iq.chat mute.controller open.menu", Color = HexToRustFormat(Interface.HexButton) },
+                    Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_MODERATOR_MUTE_BUTTON_TITLE", player.UserIDString, DataPlayer.IgnoredUsers.Count), Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.MiddleCenter }
+                }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_PANEL_MODERATION_BUTTON_MUTE");
+            }
+
+            #endregion
+
+            #endregion
+
+            CuiHelper.AddUi(player, container);
+            UpdateNickModal(player);
+            UI_Prefix_Taked(player);
+            UI_Nick_Taked(player);
+            UI_Chat_Taked(player);
+            if (IQRankSystem)
+                if (config.ReferenceSetting.IQRankSystems.UseRankSystem)
+                    UI_Rank_Taked(player);
+            TurnedPM(player);
+            TurnedAlert(player);
+            TurnedBroadcast(player);
+            TurnedSound(player);
+            TurnedGlobalChat(player);
+            if (player.IsAdmin)
+            {
+                TurnedAdminButtonMuteAllVoice(player);
+                TurnedAdminButtonMuteAllChat(player);
+            }
+        }
+
+        void UpdateNickModal(BasePlayer player)
+        {
+            CuiHelper.DestroyUi(player, "TITLE_LABEL_INFORMATION_MY_NICK");
+            CuiElementContainer container = new CuiElementContainer();
+
+            float FadeIn = 0.3f;
+            var Interface = config.InterfaceChat;
+            var DataPlayer = ChatSettingUser[player.userID];
+
+            string Prefix = string.Empty;
+            string Rank = IQRankSystem ? config.ReferenceSetting.IQRankSystems.UseRankSystem ? IQRankGetRank(player.userID) : string.Empty : string.Empty;
+            if (config.MessageSetting.MultiPrefix)
+            {
+                if (DataPlayer.MultiPrefix != null)
+                    for (int i = 0; i < DataPlayer.MultiPrefix.Count; i++)
+                        Prefix += DataPlayer.MultiPrefix[i];
+            }
+            else Prefix = DataPlayer.ChatPrefix;
+            string ResultNick = !String.IsNullOrEmpty(Rank) ? $"<b>[{Rank}] {Prefix}<color={DataPlayer.NickColor}>{player.displayName}</color> : <color={DataPlayer.MessageColor}> я лучший</color></b>" : $"<b>{Prefix}<color={DataPlayer.NickColor}>{player.displayName}</color> : <color={DataPlayer.MessageColor}> я лучший</color></b>";
+            int Size = ResultNick.Length >= 300 ? 7 : ResultNick.Length >= 200 ? 10 : ResultNick.Length >= 100 ? 15 : 20;
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.04152404 0.4785125", AnchorMax = "0.9486688 0.5385504" },
+                Text = { FadeIn = FadeIn, Text = GetLang("UI_CHAT_PANEL_INFORMATION_NICK_TITLE", player.UserIDString, $"<size={Size}>{ResultNick}</size>"), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat(Interface.HexLabel), Align = TextAnchor.UpperLeft }
+            }, IQCHAT_PARENT_MAIN_CHAT_PANEL_CONTENT, "TITLE_LABEL_INFORMATION_MY_NICK");
+
+            CuiHelper.AddUi(player, container);
+        }
+
+        #endregion
+
+        #endregion
+    }
 }
-
